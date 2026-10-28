@@ -14,6 +14,7 @@ SPDX-License-Identifier: MIT
 - **Name:** `rtl_module_interface_contract`
 - **Description:** Diagnose and repair Verilog modules that fail Vivado elaboration because the module name, port names, directions, or widths do not match the declared interface the reference testbench instantiates.
 - **Trigger:** `xelab` fails to elaborate the testbench, or `xvlog` rejects the module header.
+- **Keywords:** `module`, `interface`, `port`, `input`, `output`, `bits`, `接口`, `端口`
 - **Log signatures:** `VRFC 10-3180`, `VRFC 10-2063`, `VRFC 10-4982`, `cannot find port`, `not found while processing module instance`, `Static elaboration`
 
 ## System Prompt

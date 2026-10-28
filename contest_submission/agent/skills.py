@@ -45,19 +45,25 @@ import re
 
 class Skill:
     def __init__(self, name: str, description: str, signatures: list[str],
-                 trigger: str, body: str, path: str):
+                 trigger: str, signatures_keywords: list[str], body: str,
+                 path: str, always: bool = False):
         self.name = name
         self.description = description
         self.signatures = signatures
         self.trigger = trigger
+        self.keywords = signatures_keywords
         self.body = body
         self.path = path
+        self.always = always
 
     def matches(self, *texts: str) -> bool:
-        if not self.signatures:
+        if self.always:
+            return True
+        if not self.signatures and not self.keywords:
             return False
         haystack = "\n".join(t.lower() for t in texts if t)
-        return any(sig.lower() in haystack for sig in self.signatures)
+        return (any(sig.lower() in haystack for sig in self.signatures)
+                or any(word.lower() in haystack for word in self.keywords))
 
     def render(self, budget: int = 12000) -> str:
         return f'<skill name="{self.name}">\n{_trim(self.body, budget)}\n</skill>'
@@ -85,15 +91,35 @@ def load_skills(skill_dir: str) -> list[Skill]:
                 description=meta.get("description", ""),
                 signatures=_bullet_code_items(body, "Log signatures"),
                 trigger=_bullet_text(body, "Trigger"),
+                signatures_keywords=_bullet_code_items(body, "Keywords"),
                 body=body,
                 path=path,
+                always=meta.get("always", "").lower() == "true",
             )
         )
     return skills
 
 
 def select(skills: list[Skill], *context: str, limit: int = 2) -> list[Skill]:
-    return [s for s in skills if s.matches(*context)][:limit]
+    """Select matching error skills without loading unrelated material.
+
+    Interface-contract guidance is useful on the first generation as well as on
+    repairs, so a skill can opt in with ``Always: true`` in its metadata.
+    Keywords can match the task statement; log signatures target repair rounds.
+    """
+    haystack = "\n".join(text.lower() for text in context if text)
+
+    def rank(skill: Skill) -> int:
+        if skill.always:
+            return 10000
+        signature_hits = sum(sig.lower() in haystack for sig in skill.signatures)
+        keyword_hits = sum(word.lower() in haystack for word in skill.keywords)
+        return signature_hits * 100 + keyword_hits * 10
+
+    ranked = [(rank(skill), skill) for skill in skills]
+    ranked = [(score, skill) for score, skill in ranked if score > 0]
+    ranked.sort(key=lambda pair: (-pair[0], pair[1].name))
+    return [skill for _, skill in ranked[:max(0, limit)]]
 
 
 # ------------------------------------------------------------- truncation

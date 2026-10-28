@@ -219,6 +219,30 @@ def check_interface(source: str, interface: str,
     return 1, "interface mismatch: " + "; ".join(problems)
 
 
+def check_source_hygiene(source: str) -> tuple[int, str]:
+    """Reject common simulation-only constructs before spending a Vivado call.
+
+    The hidden testbench supplies stimulus and termination. These constructs in
+    the submitted DUT either conflict with it or make synthesis non-portable.
+    Comments and string literals are blanked before matching to avoid warnings
+    about examples mentioned in comments.
+    """
+    text = re.sub(r"//[^\n]*|/\*.*?\*/", " ", source or "", flags=re.DOTALL)
+    text = re.sub(r'"(?:\\.|[^"\\])*"', '""', text)
+    problems = []
+    for pattern, message in (
+        (r"\binitial\b", "RTL must not contain an initial block or testbench stimulus"),
+        (r"#\s*[0-9]", "RTL must not contain simulation delays"),
+        (r"\$(?:finish|fatal|display|monitor|dumpfile|dumpvars)\b",
+         "RTL must not contain testbench system tasks"),
+    ):
+        if re.search(pattern, text, re.IGNORECASE):
+            problems.append(message)
+    if problems:
+        return 1, "source hygiene failure: " + "; ".join(problems)
+    return 0, "source contains no common simulation-only constructs"
+
+
 def _ports(text: str) -> tuple[str | None, list[tuple[str, int, str]]]:
     stripped = re.sub(r"//[^\n]*", "", text)
     stripped = re.sub(r"/\*.*?\*/", "", stripped, flags=re.DOTALL)

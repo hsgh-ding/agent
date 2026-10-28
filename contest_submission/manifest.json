@@ -34,14 +34,19 @@
     "http_port": 7860
   },
   "agent": {
-    "max_rounds": 3,
+    "max_rounds": 4,
     "tools": [
       "check_interface",
+      "check_source_hygiene",
       "lint",
       "synth"
     ],
     "skills": [
-      "rtl-module-interface-contract"
+      "rtl-module-interface-contract",
+      "rtl-design-checklist",
+      "rtl-reset-and-clock",
+      "rtl-fsm-and-widths",
+      "vivado-synthesis-diagnostics"
     ]
   }
 }

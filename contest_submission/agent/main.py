@@ -37,15 +37,17 @@ import sys
 import time
 
 from .llm import LLM, LLMError, extract_code
+from .retrieval import retrieve
 from .skills import load_skills, select
-from .tools import RtlToolchain, check_interface
+from .tools import RtlToolchain, check_interface, check_source_hygiene
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 PROMPT_DIR = os.path.join(HERE, "prompts")
 SKILL_DIR = os.path.join(ROOT, "skill")
+KNOWLEDGE_DIR = os.path.join(HERE, "knowledge")
 
-MAX_ROUNDS = int(os.environ.get("AGENT_MAX_ROUNDS", "3"))
+MAX_ROUNDS = int(os.environ.get("AGENT_MAX_ROUNDS", "4"))
 DEADLINE_S = float(os.environ.get("AGENT_DEADLINE_S", "900"))
 # 为写出结果预留的余量。
 RESERVE_S = float(os.environ.get("AGENT_RESERVE_S", "20"))
@@ -130,7 +132,12 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
 
     started = time.time()
     best = ""
+    best_quality = -1
+    current = ""
     last_log = ""
+    last_stage = "generation"
+    last_error_class = "none"
+    request_timeout = llm.timeout_s
 
     for rnd in range(1, MAX_ROUNDS + 1):
         remaining = DEADLINE_S - (time.time() - started) - RESERVE_S
@@ -140,7 +147,7 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
 
         messages = [{"role": "system", "content": system}]
 
-        chosen = select(skills, prompt, last_log) if last_log else []
+        chosen = select(skills, prompt, last_log, limit=2)
         if chosen:
             messages.append({
                 "role": "system",
@@ -151,14 +158,27 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
                         selected=[s.name for s in chosen])
 
         user = build_task_block(prompt, interface)
+        notes = retrieve(prompt + "\n" + last_log,
+                         KNOWLEDGE_DIR, limit=2, max_chars=1400)
+        if notes:
+            user += "\n\n## 相关离线参考（仅供设计参考，接口与题面优先）\n"
+            user += "\n\n".join(
+                f"### {note['title']}\n{note['content']}" for note in notes)
+            trace.write(tool="knowledge", event="retrieve", round=rnd,
+                        selected=[note["id"] for note in notes])
         if last_log:
             user += "\n\n" + repair_tpl.replace("{{LOG}}", last_log) \
-                                       .replace("{{CODE}}", best)
+                                       .replace("{{CODE}}", current) \
+                                       .replace("{{STAGE}}", last_stage) \
+                                       .replace("{{ERROR_CLASS}}", last_error_class)
 
         messages.append({"role": "user", "content": user})
 
         t0 = time.time()
         try:
+            # Respect the task deadline even if a single HTTP request would
+            # otherwise wait for the full configured timeout.
+            llm.timeout_s = min(request_timeout, max(1.0, remaining))
             result = llm.chat(messages)
         except LLMError as exc:
             trace.write(tool="llm", round=rnd, rc=1, excerpt=str(exc)[:500])
@@ -174,23 +194,40 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
             trace.write(tool="extract", round=rnd, rc=1,
                         excerpt="no code block in reply")
             last_log = "上一轮回复中没有找到代码块。只输出一个 ```verilog 代码块，不要加解释。"
+            last_stage = "generation"
+            last_error_class = "输出格式"
             continue
 
-        best = code
-        # Save every new candidate at once. If the service stops us at the
-        # deadline, the latest candidate is still there to hand in.
-        save(best)
+        current = code
 
         # --- cheapest check first: no tools needed, and it catches the L0 class
         rc, msg = check_interface(code, interface, prompt)
         trace.write(tool="check_interface", round=rnd, rc=rc, excerpt=msg[:500])
         if rc != 0:
+            quality = 0
             last_log = msg
+            last_stage = "interface"
+            last_error_class = classify_failure(msg, last_stage)
+            if quality >= best_quality:
+                best, best_quality = code, quality
+                save(best)
             continue
+        quality = 1
+        if quality >= best_quality:
+            best, best_quality = code, quality
+            save(best)
         # 评测题集的 interface 是空串，此时上面那步改用题面的端口清单，且只作
         # 提示不拦截（题面是散文，可能与参考实现不符）。提示仍要带进下一轮，
         # 否则等于没查。见 docs/API_CONTRACT.md「interface 在 RTL 评测题集下是空串」。
         interface_note = msg if msg.startswith("⚠") else ""
+
+        rc, msg = check_source_hygiene(code)
+        trace.write(tool="check_source_hygiene", round=rnd, rc=rc, excerpt=msg[:500])
+        if rc != 0:
+            last_log = _with_note(interface_note, msg)
+            last_stage = "static_check"
+            last_error_class = "RTL 混入测试台或仿真专用构造"
+            continue
 
         remaining = DEADLINE_S - (time.time() - started) - RESERVE_S
         if remaining <= 0:
@@ -201,13 +238,25 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
         trace.write(tool="lint", round=rnd, rc=rc, excerpt=log[:2000])
         if rc > 0:
             last_log = _with_note(interface_note, log)
+            last_stage = "lint"
+            last_error_class = classify_failure(last_log, last_stage)
+            if quality >= best_quality:
+                best, best_quality = code, quality
+                save(best)
             continue
         if rc < 0:
             # No toolchain. We cannot verify further, so do not burn rounds
             # pretending we can.
             trace.write(tool="agent", event="stop", round=rnd,
                         reason="no verification available")
+            if quality >= best_quality:
+                best, best_quality = code, quality
+                save(best)
             return code
+        quality = 2
+        if quality >= best_quality:
+            best, best_quality = code, quality
+            save(best)
 
         remaining = DEADLINE_S - (time.time() - started) - RESERVE_S
         if remaining <= 0:
@@ -217,12 +266,21 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
         trace.write(tool="synth", round=rnd, rc=rc, excerpt=log[:2000])
         if rc == 0:
             trace.write(tool="agent", event="accept", round=rnd)
+            best, best_quality = code, 3
+            save(best)
             return code
         if rc < 0:
+            if quality >= best_quality:
+                best, best_quality = code, quality
+                save(best)
             return code
 
         last_log = _with_note(interface_note, log)
+        last_stage = "synthesis"
+        last_error_class = classify_failure(last_log, last_stage)
 
+    trace.write(tool="agent", event="best_candidate", quality=best_quality,
+                bytes=len(best))
     return best
 
 
@@ -245,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         trace.write(tool="agent", event="start", mode="agent",
                     llm=llm.describe(), deadline_s=DEADLINE_S)
 
-        top = args.top or infer_top(interface)
+        top = args.top or infer_top(interface, prompt)
         code = solve_agent(llm, trace, prompt, interface, top,
                            save=lambda c: save_solution(sol_path, c))
     except Exception as exc:  # noqa: BLE001 -- never fail loudly, see run.sh
@@ -261,10 +319,32 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def infer_top(interface: str) -> str:
-    """Best-effort top module name from the declared interface."""
+def infer_top(interface: str, prompt: str = "") -> str:
+    """Use an explicit interface first, then an explicit prompt module name."""
     m = re.search(r"\bmodule\s+(\w+)", interface or "")
+    if m:
+        return m.group(1)
+    m = re.search(r"\bmodule\s+named\s+([A-Za-z_][A-Za-z0-9_$]*)", prompt or "", re.I)
     return m.group(1) if m else "TopModule"
+
+
+def classify_failure(log: str, stage: str) -> str:
+    """Coarsely route a diagnostic to focused repair guidance."""
+    text = (log or "").lower()
+    if any(token in text for token in ("interface mismatch", "missing port",
+                                       "extra port", "module <", "cannot find port")):
+        return "模块名或端口接口"
+    if any(token in text for token in ("syntax error", "vrfc 10-4982",
+                                       "undeclared", "not declared", "xvlog")):
+        return "语法或 elaboration 编译错误"
+    if any(token in text for token in ("latch", "multiple driver", "multiple driven",
+                                       "synth 8-", "synthesis failed", "not supported")):
+        return "综合结构或可综合性"
+    if stage == "lint":
+        return "编译或 elaboration 错误"
+    if stage == "synthesis":
+        return "综合错误"
+    return "未分类错误"
 
 
 if __name__ == "__main__":
