@@ -245,3 +245,72 @@ pkill -f vllm.entrypoints.openai.api_server
 ```
 
 投题 HTTP API（7860 端口）是正式服务接口测试；如果你目前只想测 Agent 解题，不需要启动 `serve/run_api.sh` 或暴露隧道端口。
+
+## 9. 判断 Agent 是否变好
+
+必须让 Agent 和官方 `baseline` 用同一个 Jupyter 实例里的 Qwen3-8B 服务、同一题集、同一输出
+上限、思考设置和采样次数。`baseline` 是裸模型一次生成；Agent 的分数高于 baseline 才能说明
+当前 Agent 流程有增益。只看 Agent 自己的分数不能判断 RAG、技能或重试有没有帮助。
+
+官方每题只取最高级：L0=0，L1=0.2，L2=0.7，L3=1.0。`pass@1` 是计入能力/增益的主指标；
+`pass@5` 只是稳定性诊断。比如 Agent `0.667`、baseline `0.733`，表示本次 Agent 比裸模型低，
+不是优化成功。题数少时单题影响很大，最好先跑完整官方自测集，再对有变化的版本重复多次。
+
+官方归一化增益为 `g = (agent_score - baseline_score) / (1 - baseline_score)`；当 baseline 已是
+1.0 时分母为零，该轮不能计算增益。增益项得分为 `40 × min(g / 0.6, 1)`，负增益按 0 分计。
+同时查看失败题的 trace：接口/抽取失败优先修格式，lint 失败看 Vivado 首错，L1 但未到 L2
+说明功能语义错，L2 未到 L3 才是综合问题。不要仅凭模型“说成功”判断，官方 judge 的等级才是准数。
+
+建议的比较流程：先只跑一次确认链路，再至少用 3 道以上不同题检查趋势；每次只改变一项
+（例如一条 skill 或重试轮数），并记录 `score.json`、各题级别、耗时和失败类别。改动后的
+结果低于 baseline，就先回看失败题和 `trace.jsonl`，不要继续叠提示词。
+
+## 10. 投题服务与 rc-tunnel 检查
+
+投题令牌和模型下载令牌不是一回事。`FPGACHINA_TOKEN` 是赛事方发给队伍的业务鉴权令牌，
+`serve/serve_api.py` 用它保护 `/v1/health`、`/v1/solve` 和 `/v1/jobs/...`；它既不是
+Hugging Face token，也不是 LLM API key。不要把它写入 Git 或提交包。
+
+在 Jupyter 实例终端执行：
+
+```bash
+source /workspace/env.sh 2>/dev/null || true
+cd /workspace/agent/contest_submission
+export FPGACHINA_TOKEN='赛事方令牌'
+export MODEL_NAME=Qwen3-8B
+export MODEL=/workspace/models/Qwen3-8B
+export AGENT_TMP=/var/tmp
+
+./serve/start.sh
+./serve/run_api.sh start
+curl -i -H "Authorization: Bearer $FPGACHINA_TOKEN" \
+  http://127.0.0.1:7860/v1/health
+```
+
+本机健康检查必须先返回 HTTP 200 和 `"ready":true`。随后检查隧道所连接的服务器：
+
+```bash
+grep -E '^[[:space:]]*serverAddr' /root/.local/state/rc-tunnel/frpc.toml
+"$HOME/.local/bin/rc-tunnel" status
+```
+
+看到 `serverAddr = rc-tun-cn.anruicloud.com` 且状态 `ready: true` 表示隧道控制面正常。
+如果仍是 `frp-tunnel.amd-cloud.com`、公网地址返回 404，先停止旧隧道，再在没有代理变量的
+环境中重新暴露 7860，并保持该终端进程运行：
+
+```bash
+env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
+  "$HOME/.local/bin/rc-tunnel" expose --port 7860
+```
+
+`status` 输出公网 URL 后，在自己的电脑（不是 Jupyter 实例）检查：
+
+```powershell
+$env:FPGACHINA_TOKEN = "赛事方令牌"
+curl.exe -i -H "Authorization: Bearer $env:FPGACHINA_TOKEN" `
+  "https://公网地址/v1/health"
+```
+
+结果含义：`200 + ready:true` 表示可投题；`401` 是令牌错误；`500` 是实例中的
+`FPGACHINA_TOKEN` 没设置；`404` 通常是隧道转发到错误端口或旧隧道；连接超时则先检查
+`serve/run_api.sh status`、本机 7860 健康检查和 `rc-tunnel status`。
