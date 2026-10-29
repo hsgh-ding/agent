@@ -16,7 +16,7 @@
 # rc-tunnel expose. FPGACHINA_TOKEN and MODEL_NAME must be set in the
 # environment, e.g. by `source /workspace/env.sh`.
 #
-# Do not use `set -u` here, see docs/API_CONTRACT.md section 10.
+# Avoid `set -u`: token and platform variables are checked explicitly below.
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PORT="${API_PORT:-7860}"

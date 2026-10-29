@@ -1,30 +1,12 @@
-"""Minimal RTL agent.
+"""Competition RTL agent.
 
-    generate -> check interface -> lint -> synth -> read the error -> regenerate
+For each task, generate one synthesizable DUT candidate, run deterministic
+interface/source checks, then use Vivado elaboration and synthesis diagnostics
+for bounded repair. The official functional testbench is hidden from the agent;
+this package must emit only solution.v RTL and must never claim simulation
+correctness from lint or synthesis.
 
-Three rounds, then stop. That is the whole control flow, and it is deliberately
-the least interesting part of a competitive submission -- it exists so you have
-something that runs end to end on day one, not so you can submit it.
-
-    python -m agent.main --input <dir> --output <dir>
-
-The checks run cheapest-first. `check_interface` needs no tools at all and
-removes the failure class that costs the most (a wrong port name is L0, not L1),
-so spending a Vivado invocation to discover it would be waste.
-
-What is worth improving, roughly in order of payoff:
-
-  * Self-verification. The official testbench is not handed to the agent, so
-    passing lint and synth says nothing about correctness. Almost all of the
-    distance between L1 and L2 lives here -- and on the RTL side that step is
-    worth 0.5 of the coefficient, the largest jump in the table.
-  * Retry policy. This loop regenerates from scratch every round. Patching the
-    previous attempt is usually cheaper and sometimes worse; which one wins
-    depends on the failure class, and that is a measurable question.
-  * Context management. summarize_log() keeps lines matching a fixed keyword
-    list. An elaboration error and a synthesis error deserve different excerpts.
-  * Budget allocation. Rounds are equal-cost here. They should not be -- the
-    first round is the one most likely to succeed.
+Entry point: python -m agent.main --input <dir> --output <dir>
 """
 
 from __future__ import annotations
@@ -39,7 +21,8 @@ import time
 from .llm import LLM, LLMError, extract_code
 from .retrieval import retrieve
 from .skills import load_skills, select
-from .tools import RtlToolchain, check_interface, check_source_hygiene
+from .tools import (RtlToolchain, check_interface, check_source_hygiene,
+                    repair_procedural_net_output)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -129,6 +112,7 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
 
     system = read_prompt_file("system.md")
     repair_tpl = read_prompt_file("repair.md")
+    behavior_review_tpl = read_prompt_file("review.md")
 
     started = time.time()
     best = ""
@@ -138,6 +122,7 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
     last_stage = "generation"
     last_error_class = "none"
     request_timeout = llm.timeout_s
+    behavior_review_done = False
 
     for rnd in range(1, MAX_ROUNDS + 1):
         remaining = DEADLINE_S - (time.time() - started) - RESERVE_S
@@ -146,6 +131,7 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
             break
 
         messages = [{"role": "system", "content": system}]
+        review_after_auto_repair = False
 
         chosen = select(skills, prompt, last_log, limit=2)
         if chosen:
@@ -167,10 +153,14 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
             trace.write(tool="knowledge", event="retrieve", round=rnd,
                         selected=[note["id"] for note in notes])
         if last_log:
-            user += "\n\n" + repair_tpl.replace("{{LOG}}", last_log) \
-                                       .replace("{{CODE}}", current) \
-                                       .replace("{{STAGE}}", last_stage) \
-                                       .replace("{{ERROR_CLASS}}", last_error_class)
+            if last_stage == "behavioral_review":
+                user += "\n\n" + behavior_review_tpl.replace("{{NOTICE}}", last_log) \
+                                                     .replace("{{CODE}}", current)
+            else:
+                user += "\n\n" + repair_tpl.replace("{{LOG}}", last_log) \
+                                           .replace("{{CODE}}", current) \
+                                           .replace("{{STAGE}}", last_stage) \
+                                           .replace("{{ERROR_CLASS}}", last_error_class)
 
         messages.append({"role": "user", "content": user})
 
@@ -198,6 +188,11 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
             last_error_class = "输出格式"
             continue
 
+        if current and code == current and last_log:
+            trace.write(tool="agent", event="stalled_candidate", round=rnd,
+                        reason="model returned byte-identical RTL after repair feedback")
+            break
+
         current = code
 
         # --- cheapest check first: no tools needed, and it catches the L0 class
@@ -218,7 +213,7 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
             save(best)
         # 评测题集的 interface 是空串，此时上面那步改用题面的端口清单，且只作
         # 提示不拦截（题面是散文，可能与参考实现不符）。提示仍要带进下一轮，
-        # 否则等于没查。见 docs/API_CONTRACT.md「interface 在 RTL 评测题集下是空串」。
+        # 否则等于没查。依据官方评测输入格式：评测题目的 interface.txt 为空。
         interface_note = msg if msg.startswith("⚠") else ""
 
         rc, msg = check_source_hygiene(code)
@@ -235,7 +230,50 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
             break
 
         rc, log = rtl.lint(code, top, timeout_s=min(remaining, 300))
-        trace.write(tool="lint", round=rnd, rc=rc, excerpt=log[:2000])
+        lint_error_class = classify_failure(log, "lint") if rc > 0 else None
+        trace.write(tool="lint", round=rnd, rc=rc, error_class=lint_error_class,
+                    excerpt=log[:2000])
+        if rc > 0:
+            # A narrow deterministic repair handles the unambiguous Vivado
+            # case where 10-1280 identifies an ANSI output declared as a net.
+            # It changes only the port's variable/net type; all behavioral
+            # repairs remain model-driven because the compiler cannot prove
+            # cycle-level correctness.
+            repaired = repair_procedural_net_output(code, log, top)
+            if repaired:
+                code, signal = repaired
+                current = code
+                review_after_auto_repair = not behavior_review_done
+                trace.write(tool="auto_repair", round=rnd,
+                            rule="VRFC 10-1280: explicit output net to reg",
+                            signal=signal, rc=0)
+                interface_rc, interface_log = check_interface(code, interface, prompt)
+                hygiene_rc, hygiene_log = check_source_hygiene(code)
+                trace.write(tool="check_interface", round=rnd,
+                            attempt="after_auto_repair", rc=interface_rc,
+                            excerpt=interface_log[:500])
+                trace.write(tool="check_source_hygiene", round=rnd,
+                            attempt="after_auto_repair", rc=hygiene_rc,
+                            excerpt=hygiene_log[:500])
+                if interface_rc != 0 or hygiene_rc != 0:
+                    rc = 1
+                    log = interface_log if interface_rc != 0 else hygiene_log
+                else:
+                    if quality >= best_quality:
+                        best, best_quality = code, quality
+                        save(best)
+                    remaining = DEADLINE_S - (time.time() - started) - RESERVE_S
+                    if remaining <= 0:
+                        trace.write(tool="budget", event="stop", round=rnd,
+                                    reason="deadline after deterministic repair")
+                        break
+                    rc, log = rtl.lint(code, top, timeout_s=min(remaining, 300))
+                    trace.write(
+                        tool="lint", round=rnd, attempt="after_auto_repair",
+                        rc=rc,
+                        error_class=classify_failure(log, "lint") if rc > 0 else None,
+                        excerpt=log[:2000],
+                    )
         if rc > 0:
             last_log = _with_note(interface_note, log)
             last_stage = "lint"
@@ -263,11 +301,26 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
             break
 
         rc, log = rtl.synth(code, top, timeout_s=remaining)
-        trace.write(tool="synth", round=rnd, rc=rc, excerpt=log[:2000])
+        synth_error_class = classify_failure(log, "synthesis") if rc > 0 else None
+        trace.write(tool="synth", round=rnd, rc=rc, error_class=synth_error_class,
+                    excerpt=log[:2000])
         if rc == 0:
-            trace.write(tool="agent", event="accept", round=rnd)
             best, best_quality = code, 3
             save(best)
+            if review_after_auto_repair:
+                behavior_review_done = True
+                trace.write(tool="agent", event="request_behavior_review", round=rnd,
+                            reason="automatic declaration repair fixed elaboration only")
+                last_log = (
+                    f"确定性修复只把输出端口 {signal} 的 net 声明改成了变量声明；当前候选已通过 "
+                    "lint 与综合，但这不能证明功能正确。请对照题面检查当前 RTL 的逐拍行为，特别是复位、"
+                    "输出是否意外延迟或粘滞、事件脉冲清除、FSM 重叠匹配和边界条件。只有能指出具体语义错误"
+                    "时才修改；如果行为符合题面，就原样输出当前 RTL。不要声称已通过隐藏功能仿真。"
+                )
+                last_stage = "behavioral_review"
+                last_error_class = "确定性编译修复后的逐拍语义复核"
+                continue
+            trace.write(tool="agent", event="accept", round=rnd)
             return code
         if rc < 0:
             if quality >= best_quality:
@@ -334,6 +387,10 @@ def classify_failure(log: str, stage: str) -> str:
     if any(token in text for token in ("interface mismatch", "missing port",
                                        "extra port", "module <", "cannot find port")):
         return "模块名或端口接口"
+    if any(token in text for token in (
+            "vrfc 10-1280", "procedural assignment to a non-register",
+            "left-hand side should be reg")):
+        return "过程赋值目标声明错误（wire/reg）"
     if any(token in text for token in ("syntax error", "vrfc 10-4982",
                                        "undeclared", "not declared", "xvlog")):
         return "语法或 elaboration 编译错误"
@@ -349,3 +406,4 @@ def classify_failure(log: str, stage: str) -> str:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

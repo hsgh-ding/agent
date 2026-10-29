@@ -13,6 +13,8 @@ and declared interface are authoritative; this note is only a reminder.
 - Do not add a testbench, stimulus, delays, `$finish`, file I/O, or debug ports.
 - Separate combinational and clocked logic. Use `<=` in clocked blocks and give
   combinational outputs a default value on every path.
+- Check every procedural-assignment target is a variable: an ANSI `output name`
+  or `wire` is a net; use `output reg` / `output logic` for a registered output.
 - Treat reset polarity and synchronous/asynchronous behavior exactly as stated.
 - Give arithmetic operands explicit widths and handle zero/one-width corner cases.
 - Keep one driver per signal and avoid unsized constants in comparisons.

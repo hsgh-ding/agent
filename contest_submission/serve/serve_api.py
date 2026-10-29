@@ -25,7 +25,7 @@ notebook can be exposed, so leave vLLM's 8000 internal.
 The public app URL carries no platform-level auth, so the token check below is
 not optional -- without it anyone who learns the URL can submit tasks.
 
-See docs/API_CONTRACT.md for the full contract.
+See serve/README.md for request examples and operational details.
 """
 
 from __future__ import annotations

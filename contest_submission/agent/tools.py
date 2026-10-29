@@ -140,7 +140,7 @@ def ports_from_prompt(prompt: str) -> tuple[str | None, list[tuple[str, int, str
     """从题面还原模块名与端口表。
 
     **评测题集的 `interface` 是空串** —— 接口信息写在题面里，不另出一份
-    （见 docs/API_CONTRACT.md）。不从题面取的话，check_interface 在评测当天会
+    （官方评测输入中 interface.txt 为空）。不从题面取的话，check_interface 在评测当天会
     静默失效：输入为空、检查照常返回「通过」，而 trace 里看不出区别。
     而接口写错在本 track 判 L0，是全表最重的惩罚，这个检查恰恰最不该失效。
     """
@@ -153,7 +153,7 @@ def ports_from_prompt(prompt: str) -> tuple[str | None, list[tuple[str, int, str
         # 的题面把 8 位的 out 写成 1 位，找出它正是题目要求）。把它当规格会让
         # 智能体把 bug 改回去。解析不出就如实返回空。
         # 另：该题参考实现还把 sel 极性反了（sel ? a : b），题面推不出，属数据集
-        # 缺陷，见 selftest/README.md。智能体在这道题上过不了 L2 不说明修复逻辑有错。
+        # 题面里可能包含故意有误的待修复 RTL，不能把其端口声明当规格。
         return None, []
     m = re.search(r"module\s+named\s+(\w+)", text)
     return (m.group(1) if m else "TopModule"), ports
@@ -243,6 +243,120 @@ def check_source_hygiene(source: str) -> tuple[int, str]:
     return 0, "source contains no common simulation-only constructs"
 
 
+def repair_procedural_net_output(source: str, log: str, top: str
+                                 ) -> tuple[str, str] | None:
+    """Safely repair one common Vivado 10-1280 cause in an ANSI module header.
+
+    When the diagnostic names the non-register target (or one eligible output
+    can be inferred unambiguously), and it is an explicitly declared output
+    net (``output foo`` / ``output wire foo``) in the selected top's ANSI port
+    list, changing only its declaration to ``output reg`` preserves the port
+    contract and makes the procedural assignment legal. Ambiguous/inherited
+    declarations are left for the LLM.
+
+    This deliberately does not rewrite the always block: the diagnostic proves
+    a type error, not that the signal's cycle behavior is correct.
+    """
+    diagnostic = re.search(
+        r"VRFC\s+10-1280.*?procedural assignment to a non-register\s+"
+        r"[`'\"]?([A-Za-z_$][A-Za-z0-9_$]*)",
+        log or "", re.IGNORECASE | re.DOTALL,
+    )
+    if not re.search(r"VRFC\s+10-1280", log or "", re.IGNORECASE):
+        return None
+    # Some Vivado releases use the word "detected" immediately after
+    # "non-register" rather than printing the signal name. Treat that token as
+    # unknown and infer a target only when exactly one explicit output net is
+    # procedurally assigned in the selected module.
+    target = diagnostic.group(1) if diagnostic else None
+    if target and target.lower() in {"is", "not", "permitted", "left", "hand"}:
+        target = None
+
+    # Mask comments without changing offsets, so a diagnostic-like comment or
+    # commented-out port cannot be mistaken for executable source.
+    masked = re.sub(r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\])*\"",
+                    lambda m: re.sub(r"[^\r\n]", " ", m.group(0)),
+                    source or "", flags=re.DOTALL)
+    module_re = re.compile(
+        r"\bmodule\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*"
+        r"(?:#\s*\([^;]*?\)\s*)?\((.*?)\)\s*;",
+        re.DOTALL,
+    )
+    module = next((m for m in module_re.finditer(masked) if m.group(1) == top), None)
+    if module is None:
+        return None
+
+    ports_start, ports_end = module.span(2)
+    port_text = masked[ports_start:ports_end]
+    if target is None:
+        port_segments = port_text.split(",")
+        # Do not guess across ANSI declarations that inherit the preceding
+        # direction/type (for example ``output a, b``).
+        if any(segment.strip() and not re.match(
+                r"(?:input|output|inout)\b", segment.strip(), re.IGNORECASE)
+               for segment in port_segments):
+            return None
+        tail = masked[module.end():]
+        module_end = re.search(r"\bendmodule\b", tail, re.IGNORECASE)
+        procedural_body = tail[:module_end.start()] if module_end else tail
+        inferred: list[str] = []
+        for segment in port_segments:
+            output = re.match(
+                r"\s*output\b(?P<mods>(?:\s+(?:wire|reg|logic|var|signed|unsigned)\b)*)"
+                r"(?:\s*\[[^\]]+\])?\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*$",
+                segment, re.IGNORECASE,
+            )
+            if not output or re.search(r"\b(?:reg|logic|var)\b",
+                                       output.group("mods"), re.IGNORECASE):
+                continue
+            name = output.group("name")
+            if re.search(rf"\b{re.escape(name)}\s*(?:<=|=)",
+                         procedural_body, re.IGNORECASE):
+                # A continuous assignment means the signal has a different
+                # structural issue; leave it to the model.
+                if not re.search(rf"\bassign\s+{re.escape(name)}\b",
+                                 procedural_body, re.IGNORECASE):
+                    inferred.append(name)
+        if len(inferred) != 1:
+            return None
+        target = inferred[0]
+
+    # A net also driven by a continuous assignment needs a structural review;
+    # converting its type may make a second-driver bug harder to see.
+    if re.search(rf"\bassign\s+{re.escape(target)}\b", masked, re.IGNORECASE):
+        return None
+    # Restrict the edit to one comma-delimited ANSI declaration. If the signal
+    # inherits its direction/type from a preceding port, leave it untouched.
+    target_decl = re.compile(
+        rf"(?P<direction>\boutput\b)(?P<mods>(?:\s+(?:wire|reg|logic|var|signed|unsigned)\b)*)"
+        rf"(?P<range>\s*\[[^\]]+\])?(?P<gap>\s+){re.escape(target)}\b",
+        re.IGNORECASE,
+    )
+    offset = 0
+    for segment in port_text.split(","):
+        match = target_decl.search(segment)
+        if not match:
+            offset += len(segment) + 1
+            continue
+        if re.search(r"\b(?:reg|logic|var)\b", match.group("mods"), re.IGNORECASE):
+            return None
+
+        segment_start = ports_start + offset
+        mods = match.group("mods")
+        wire = re.search(r"\bwire\b", mods, re.IGNORECASE)
+        if wire:
+            start = segment_start + match.start("mods") + wire.start()
+            end = segment_start + match.start("mods") + wire.end()
+            repaired = source[:start] + "reg" + source[end:]
+        else:
+            # Add the variable type immediately after the explicit direction.
+            insert_at = segment_start + match.end("direction")
+            repaired = source[:insert_at] + " reg" + source[insert_at:]
+        return repaired, target
+
+    return None
+
+
 def _ports(text: str) -> tuple[str | None, list[tuple[str, int, str]]]:
     stripped = re.sub(r"//[^\n]*", "", text)
     stripped = re.sub(r"/\*.*?\*/", "", stripped, flags=re.DOTALL)
@@ -291,12 +405,9 @@ def _scratch_dir() -> str:
     Vivado produces large numbers of small files. On the NFS-backed /workspace of
     the cloud platform that is pathologically slow. This is not an optimisation.
 
-    Section 9 of docs/API_CONTRACT.md names `/tmp/eda` and the base image exports it
-    as `EDA_TMP`. Honour it -- running run.sh directly (rather than through
-    serve_api.py, which passes `AGENT_TMP`) otherwise lands in `/tmp`, which is
-    local disk too but not the directory the platform cleans up for you.
-
-    `TRACK_TMP` is the old name of `EDA_TMP`, kept as a fallback.
+    The competition image exposes `/tmp/eda` as `EDA_TMP`; the submission API may
+    set `AGENT_TMP` per request. Prefer those paths and keep the fallback on local
+    `/tmp`, never the network-backed workspace. `TRACK_TMP` is a legacy fallback.
     """
     return (os.environ.get("AGENT_TMP")
             or os.environ.get("EDA_TMP")

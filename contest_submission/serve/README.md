@@ -99,12 +99,12 @@ Vivado 综合产生的大量小文件写在上面极慢。这不是优化建议�
 **常驻进程只从 `start.sh` 起。** 推理服务与队伍自己的常驻引擎都写进 `start.sh`，用
 `setsid` 拉起。容器重建这条退路下，赛事方只运行 `start.sh` 再逐题调用 `run.sh`，不启动
 `serve_api.py`；超时信号发给 `run.sh` 的进程组，由 `run.sh` 在后台带起的常驻进程会随之
-被结束。详见 `docs/API_CONTRACT.md` 第八节。
+被结束。参见 `serve_api.py` 中的进程组超时处理实现。
 
 **进程要自己回收。** 平台实例的 1 号进程是 JupyterLab，它不回收孤儿进程，被结束的子进程
 会作为僵尸一直占着进程号，攒多了新进程就起不来。`serve_api.py` 启动时把自己设为回收者
 （`PR_SET_CHILD_SUBREAPER`），每题结束后回收该题的全部进程。换成自己的服务时这一段
-要保留。详见 `docs/API_CONTRACT.md` 第十节。
+要保留。相关回收逻辑位于 `serve_api.py`，请勿在替换服务时删除。
 
 ---
 

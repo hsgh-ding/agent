@@ -10,7 +10,7 @@
 # pulled from outside, and the instances have no docker, so teams do not build
 # this file themselves. Keep BASE_IMAGE as is and keep the steps below in line
 # with what you actually ran on the instance; the organisers rebuild from it
-# only in the fallback mode (docs/API_CONTRACT.md section 8).
+# only in the fallback mode (README.md and serve/README.md).
 ARG BASE_IMAGE=fpgachina-rtlhls@sha256:a7cf627e11708e8a6dcd9de689ff934f7b450b79369ebc7bb0217e8b54d81e56
 FROM ${BASE_IMAGE}
 
@@ -48,11 +48,12 @@ ENV LLM_BACKEND=openai \
 # says to read the variables instead of hardcoding a path.
 
 # Container metadata only. On Radeon Cloud both services bind 127.0.0.1 and
-# just 7860 is published, via rc-tunnel. See docs/API_CONTRACT.md section 7.
+# just 7860 is published, via rc-tunnel. See serve/README.md.
 EXPOSE 7860 8000
 
 # Not an entrypoint on purpose. Evaluation is by HTTP submission: the team
 # runs serve/start.sh, then serve/serve_api.py. In the container-rebuild
 # fallback the organisers run serve/start.sh once and then call run.sh /
-# run_baseline.sh per task directly. See docs/API_CONTRACT.md section 8.
+# run_baseline.sh per task directly. See README.md and serve/README.md.
 CMD ["/bin/bash"]
+

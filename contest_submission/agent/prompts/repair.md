@@ -19,6 +19,11 @@
 2. 判断这是哪一类失败：
    - **接口不符** —— `interface mismatch`、`cannot find port`、`Module <X> not found`。
      照接口重写模块头，端口名一个字都不要改。这类失败得分为 0，优先处理。
+   - **VRFC 10-1280：过程赋值目标不是变量** —— 找出日志指出的左值。ANSI 端口只写
+     `output name` 时通常是 net，不能在 `always` 块中用 `=` 或 `<=` 给它赋值。若题目
+     要求寄存输出，把端口声明为 `output reg name`（SystemVerilog 可用 `output logic name`），
+     并在时钟块中直接、每个有效周期更新该输出；不要额外套一层未清零或多打一拍的寄存器。
+     组合输出则保留 net，并改用连续赋值 `assign`。修复声明时保留题目规定的时序和重叠行为。
    - **语法错误** —— `VRFC 10-4982 syntax error`，多半是模块头缺分号、
      `begin`/`end` 不配对、位宽写法有误。
    - **不可综合的构造** —— `Synth 8-280`、`Synth 8-6156`。把 `real`、延时、

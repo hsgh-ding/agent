@@ -5,7 +5,9 @@
 [`JUPYTER_GUIDE.md`](JUPYTER_GUIDE.md)。
 
 这是一个可运行的 RTL 赛道方案包，适合作为 `<队伍编号>_rtlagent/` 仓库内容。它加入了
-接口契约和错误分类技能、离线知识检索、候选版本保留和 RTL 静态预检。**这些实现改动尚未在
+接口契约和错误分类技能、离线知识检索、候选版本保留、RTL 静态预检，以及针对明确 Vivado
+`VRFC 10-1280` 输出声明错误的窄范围确定性修复；该自动修复通过 lint/综合后，再让模型做
+一次受限的逐拍语义复核。**这些实现改动尚未在
 Radeon Cloud 官方完整题集上测分；是否提高分数要以同模型、同配置的方案/基线对照为准。**
 
 ---
@@ -20,12 +22,12 @@ Radeon Cloud 官方完整题集上测分；是否提高分数要以同模型、�
 | `run_baseline.sh` | 基线入口 | **不得修改** |
 | `baseline.py` | 赛事方提供的基线脚本，增益项以它的结果为基线 | **不得修改** |
 | `agent/main.py` | 智能体主流程：几轮循环、时间预算、写 `trace.jsonl` | **要改** |
-| `agent/tools.py` | 接口/RTL hygiene 检查、lint、综合 | **要改** |
+| `agent/tools.py` | 接口/RTL hygiene 检查、窄范围 10-1280 修复、lint、综合 | **要改** |
 | `agent/llm.py` | 调用大模型的封装 | 一般不改 |
 | `agent/skills.py` | 技能包的加载与挑选 | 视需要 |
 | `agent/prompts/system.md` | 主提示词，告诉模型该怎么写 RTL | **要改** |
 | `agent/prompts/repair.md` | 报错后让模型改错用的提示词 | **要改** |
-| `skill/` | 接口、复位、FSM/位宽和综合错误技能 | **要改** |
+| `skill/` | 接口、复位、FSM/位宽和 Vivado 诊断技能 | **要改** |
 | `agent/knowledge/competition/` | 离线 Verilog、时序、位宽、接口和 Vivado 知识 | **要改** |
 | `model/MODEL.md` | 模型声明。不如实填写，增益项 40 分不得分 | **必须填** |
 | `serve/vllm.sh` | 启动本地推理服务 | 按所选模型改 |

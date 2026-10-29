@@ -1,92 +1,232 @@
-# Radeon Cloud Jupyter 使用
+# 在 Radeon Cloud Jupyter 测试比赛 Agent
 
-在官方 RTL 赛道提供的 Radeon Cloud Notebook 中操作。建议先运行官方
-`notebooks/rtl_quickstart.ipynb` 的环境检查、判定器检查和 mock 步骤，再克隆你的私有方案仓库。
-模型权重放在 `/workspace` 持久盘，EDA 临时文件放在 `/var/tmp`；不要把模型上传到 Git，
-也不要把大批 Vivado 临时文件放在 4 GB 的 `/tmp`。
+下面命令在 JupyterLab 的 **Terminal** 里运行，不是在本地 Windows 终端。流程是：先测脚本链路，再启动模型写一道题，最后用官方判定器给 RTL 打 L1/L2/L3。
 
-## 下载并固定模型
+## 1. 确认仓库目录
 
-以下代码取当前公开仓库的 commit SHA，并用这个 SHA 下载，之后复现时权重不会随 `main` 改变：
-
-```python
-from huggingface_hub import HfApi, snapshot_download
-
-repo_id = "Qwen/Qwen3-8B"
-revision = HfApi().model_info(repo_id, revision="main").sha
-model_dir = "/workspace/models/Qwen3-8B"
-snapshot_download(repo_id=repo_id, revision=revision, local_dir=model_dir)
-print("revision:", revision)
-print("model directory:", model_dir)
-```
-
-把 SHA 写入 `manifest.json` 的 `model.revision` 和 `model/MODEL.md`。如果 Hugging Face 访问失败，
-先保留 Notebook 的下载错误输出；不要改用无法公开复现的临时链接。
-
-## 启动模型与验证方案
-
-假设私有仓库克隆在 `/workspace/<队伍仓库>`，官方仓库在 `/workspace/rtlagent2026`：
+你的 GitHub 仓库是 `hsgh-ding/agent`，提交包在仓库内的 `contest_submission/` 子目录。若还没克隆：
 
 ```bash
-TEAM=/workspace/<队伍仓库>
+cd /workspace
+git clone https://github.com/hsgh-ding/agent.git
+```
+
+官方仓库如果尚未放在 `/workspace/rtlagent2026`，再克隆：
+
+```bash
+git clone https://gitee.com/Vickyiii/rtlagent2026.git /workspace/rtlagent2026
+```
+
+设置路径并确认关键文件存在：
+
+```bash
+REPO=/workspace/agent
+TEAM="$REPO/contest_submission"
 OFFICIAL=/workspace/rtlagent2026
-TASK="$OFFICIAL/tasks/ex01_popcount8"
-cd "$TEAM"
-
-MODEL=/workspace/models/Qwen3-8B ./serve/start.sh
-python -m pip show vllm
-rocm-smi --showmemuse
+TASK="$OFFICIAL/tasks/ex03_lfsr8"
+test -f "$TEAM/run.sh" && test -f "$TEAM/manifest.json" && test -f "$TASK/prompt.txt" && echo "路径正确"
 ```
 
-记录 vLLM 版本和模型完成一次请求后的显存用量，再填入 `manifest.json` 的 `serving.version`、
-`model.measured_vram_gb` 及 `model/MODEL.md`。显存上限按赛事规则是单卡 32 GB；`serve/vllm.sh`
-默认以 30 GB 预算启动。若实测超过上限，应先降低预算或模型配置并重测。
-
-先验证方案的输入输出链路，再用真实模型运行一题：
+如果你在 Windows 工作区看到的文件改动还没有提交并推送到 GitHub，Jupyter 克隆到的仍会是旧代码。先把最新 `contest_submission/` 上传到仓库；仓库已克隆时这样更新：
 
 ```bash
-LLM_BACKEND=mock ./run.sh "$TASK" /tmp/agent-mock
-LLM_BACKEND=openai LLM_BASE_URL=http://127.0.0.1:8000/v1 \
-  LLM_API_KEY=dummy LLM_MODEL=Qwen3-8B LLM_MAX_TOKENS=16384 \
-  ./run.sh "$TASK" /tmp/agent-qwen
+cd /workspace/agent
+git pull --ff-only
+TEAM=/workspace/agent/contest_submission
+python3 -m unittest discover -s "$TEAM/tests" -v
 ```
 
-用官方判定器看等级。再对同一道题运行基线，保证方案和基线连接同一个模型服务：
+这一步只跑包内单元测试，不需要 GPU 或模型。真实模型 A/B 测试请等第 4–5 节启动 Qwen 服务并
+完成环境设置后，再按第 7 节的命令执行；否则脚本可能会使用 mock。
+
+## 2. 检查磁盘、Vivado 和模型文件
+
+```bash
+df -h /workspace /var/tmp
+command -v xvlog xelab xsim vivado
+ls -lh /workspace/models/Qwen3-8B/model-*.safetensors
+```
+
+若 Vivado 命令没找到，先尝试加载平台的环境：`source /tools/Xilinx/2026.1/Vivado/settings64.sh`，再查一次。检查模型索引列出的分片是否都存在：
+
+```bash
+python3 - <<'PY'
+import json
+from pathlib import Path
+p = Path("/workspace/models/Qwen3-8B")
+index = json.loads((p / "model.safetensors.index.json").read_text())
+missing = sorted(set(index["weight_map"].values()) - {f.name for f in p.glob("*.safetensors")})
+print("missing shards:", missing)
+if missing:
+    raise SystemExit("模型仍未下载完整，先续传")
+print("模型分片完整")
+PY
+```
+
+模型目录需要有完整权重分片和 `model.safetensors.index.json`。如果权重没下载完，先续传，不要启动 vLLM。模型权重放 `/workspace`；EDA 临时文件放 `/var/tmp`，不要放 `/tmp` 或把大日志写进快满的目录。设置临时目录和 Vivado 授权，供 Agent 与官方判定器共同使用：
+
+设置比赛运行环境：
+
+```bash
+export OMP_NUM_THREADS=16
+export AGENT_TMP=/var/tmp
+export EDA_TMP=/var/tmp/eda
+export XILINXD_LICENSE_FILE="${XILINXD_LICENSE_FILE:-2100@vivado-lic.fpgachina.svc.cluster.local}"
+export FLEXLM_TIMEOUT="${FLEXLM_TIMEOUT:-300000000}"
+mkdir -p "$AGENT_TMP" "$EDA_TMP"
+```
+
+## 3. 先用 mock 检查 Agent 文件链路
+
+这一步不调用模型，只验证 Agent 能读题、写 `solution.v` 和 `trace.jsonl`：
+
+```bash
+cd "$TEAM"
+LLM_BACKEND=mock ./run.sh "$TASK" /var/tmp/rtl-mock
+ls -lh /var/tmp/rtl-mock
+cat /var/tmp/rtl-mock/solution.v
+cat /var/tmp/rtl-mock/trace.jsonl
+```
+
+mock 代码是占位输出，**不能用它判断设计功能，也不能当比赛分数**。
+
+先用任务内的参考 RTL 验证官方判定器和 Vivado 授权。若参考设计不能到 L3，先修判定环境，不要把环境故障当成 Agent 的设计错误：
 
 ```bash
 cd "$OFFICIAL/selftest"
-python3 judge.py --task "$TASK" --solution /tmp/agent-qwen/solution.v
-cd "$TEAM"
-LLM_BACKEND=openai LLM_BASE_URL=http://127.0.0.1:8000/v1 \
-  LLM_API_KEY=dummy LLM_MODEL=Qwen3-8B LLM_MAX_TOKENS=16384 \
-  ./run_baseline.sh "$TASK" /tmp/agent-baseline
+python3 judge.py --task "$TASK" --solution "$TASK/reference/solution.sv"
 ```
 
-打开 `/tmp/agent-qwen/trace.jsonl` 查看生成、接口检查、lint、综合及各轮耗时。mock 输出是空壳，
-只验证脚本链路，不代表 Agent 解题正确。正式测试还应跑官方完整自测集，并按相同上下文、
-思考模式和模型配置比较方案与基线。
+## 4. 启动 Qwen3-8B 服务
 
-## 启动投题 API
-
-赛事投题 API 与 `/v1/chat/completions` 模型 API 是不同服务。vLLM 在本机回环地址 8000；
-方案服务在回环地址 7860。只通过 Radeon Cloud 隧道暴露 7860。
+确认模型完整后运行：
 
 ```bash
 cd "$TEAM"
-export FPGACHINA_TOKEN='<赛事方发给你的令牌>'
-export MODEL_NAME=Qwen3-8B
-./serve/run_api.sh start
-curl -H "Authorization: Bearer $FPGACHINA_TOKEN" \
-  http://127.0.0.1:7860/v1/health
+MODEL=/workspace/models/Qwen3-8B MAX_LEN=32768 VRAM_BUDGET_GB=30 ./serve/start.sh
 ```
 
-健康检查应返回 `"track":"rtl"`。`POST /v1/solve` 接收 `task_id`、`prompt`、可选的
-`interface`、`mode` 和 `deadline_s`，立即返回 `job_id`；用
-`GET /v1/jobs/<job_id>` 轮询，完成后返回 `solution`、`trace` 和 `elapsed_s`。接口请求样例、
-令牌要求和隧道命令见 [`serve/README.md`](serve/README.md)。令牌只设为环境变量，不要写入仓库。
+`start.sh` 会在后台启动 vLLM，并等到模型 API 就绪。用下面命令确认：
 
-测试完成后可用 `./serve/run_api.sh stop` 停止投题服务。停止 vLLM 可在 Notebook 清理格运行：
+```bash
+curl -fsS http://127.0.0.1:8000/v1/models
+python3 -m pip show vllm
+rocm-smi --showmemuse
+```
+
+提交规则按单卡 32 GB 显存计算；即使 W7900 显示 48 GB，也不要把 `VRAM_BUDGET_GB` 调到 32 以上。
+
+## 5. 让 Agent 真正解一道题并用官方判分
+
+```bash
+cd "$TEAM"
+LLM_BACKEND=openai \
+LLM_BASE_URL=http://127.0.0.1:8000/v1 \
+LLM_API_KEY=dummy \
+LLM_MODEL=Qwen3-8B \
+LLM_MAX_TOKENS=16384 \
+AGENT_TMP=/var/tmp \
+./run.sh "$TASK" /var/tmp/rtl-qwen
+```
+
+查看 Agent 生成的 DUT 和调用记录：
+
+```bash
+cat /var/tmp/rtl-qwen/solution.v
+cat /var/tmp/rtl-qwen/trace.jsonl
+```
+
+然后让**官方判定器**运行隐藏参考测试台，检查编译、功能仿真和综合：
+
+```bash
+cd "$OFFICIAL/selftest"
+python3 judge.py --task "$TASK" --solution /var/tmp/rtl-qwen/solution.v
+```
+
+判定结果的 L1 是可编译，L2 是官方仿真功能通过，L3 是综合通过。比赛 Agent 不生成测试台；L2 使用的是官方提供给判定器的参考测试台。
+
+## 6. 与官方基线对照
+
+Agent 和基线必须使用同一个 vLLM 服务、同一模型和 `manifest.json` 中声明的推理设置。先运行基线：
+
+```bash
+cd "$TEAM"
+LLM_BASE_URL=http://127.0.0.1:8000/v1 \
+MODEL_NAME=Qwen3-8B \
+./run_baseline.sh "$TASK" /var/tmp/rtl-baseline
+```
+
+再用相同判定器评分：
+
+```bash
+cd "$OFFICIAL/selftest"
+python3 judge.py --task "$TASK" --solution /var/tmp/rtl-baseline/solution.v
+```
+
+一题只能检查流程是否通畅。要判断 Agent 是否比基线好，需要对同一批题、同一模型配置同时跑 Agent 和基线，再比较官方 `score.json`。不要把 mock 分数当成真实成绩。
+
+## 7. 小批量题集测试
+
+确认第 4–5 节的模型服务已启动且 Agent/baseline 环境变量已设置后，先用官方现有题集做 A/B：
+
+```bash
+cd "$OFFICIAL/selftest"
+LLM_BACKEND=openai \
+LLM_BASE_URL=http://127.0.0.1:8000/v1 \
+LLM_API_KEY=dummy \
+LLM_MODEL=Qwen3-8B \
+LLM_MAX_TOKENS=16384 \
+MODEL_NAME=Qwen3-8B \
+./run_selftest.sh \
+  --tasks "$OFFICIAL/tasks" \
+  --agent "$TEAM" \
+  --out /var/tmp/rtl-ross-repair \
+  --samples 1
+```
+
+查看终端末尾的 Agent/baseline pass@1 与归一化增益，并检查
+`/var/tmp/rtl-ross-repair/score.json`。本次修改针对先前 `ex02_detect_1101` 的
+`VRFC 10-1280` 编译错误；单元测试通过不代表真实模型输出正确，必须用这一步确认该题是否从
+L0 升到 L1/L2/L3，以及整体题集分是否超过 baseline。输出端口类型修复后的模型复核只是第二次
+静态推理，最终功能仍以官方判定器结果为准。
+
+确认单题链路正常后，再用 VerilogEval v2 的 20 道题做开发测试，先不要直接跑 156 道 × 5 次：
+
+```bash
+cd /workspace
+git clone https://github.com/NVlabs/verilog-eval.git
+cd "$OFFICIAL/selftest"
+python3 veval_import.py \
+  --src /workspace/verilog-eval/dataset_spec-to-rtl \
+  --out /var/tmp/tasks_veval20 \
+  --limit 20
+./run_selftest.sh \
+  --tasks /var/tmp/tasks_veval20 \
+  --agent "$TEAM" \
+  --out /var/tmp/rtl-eval20 \
+  --samples 1
+```
+
+这个脚本会跑方案和基线、调用官方判定器，并汇总 `score.json`。临时题集、Vivado 日志和中间结果留在 `/var/tmp`；测完只把汇总分数复制到持久盘：
+
+```bash
+cp /var/tmp/rtl-eval20/score.json /workspace/rtl-eval20-score.json
+```
+
+确认磁盘足够后再扩大题集或采样次数；跑完整题集会花很久并产生大量日志。VerilogEval 只适合开发期对照，不等于官方隐藏题集成绩。
+
+## 8. 测完后
+
+查看批测汇总：
+
+```bash
+cat /workspace/rtl-eval20-score.json
+```
+
+停止 vLLM 时：
 
 ```bash
 pkill -f vllm.entrypoints.openai.api_server
 ```
+
+投题 HTTP API（7860 端口）是正式服务接口测试；如果你目前只想测 Agent 解题，不需要启动 `serve/run_api.sh` 或暴露隧道端口。

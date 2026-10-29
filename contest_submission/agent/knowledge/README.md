@@ -1,9 +1,11 @@
-# RTL Agent Knowledge Base
+# RTL Competition Knowledge Base
 
-This directory is an offline, human-editable knowledge base. Each Markdown file
-is a topic, and the agent performs lightweight keyword retrieval before a model
-request. It does not send the whole knowledge base to the model.
+This directory contains concise, offline references used by keyword retrieval.
+Each Markdown file should describe a verified RTL design rule or a competition
+constraint. Retrieved notes are reference material; the task statement and its
+explicit interface remain authoritative.
 
-Add project-specific rules, interfaces, and proven design patterns as separate
-`.md` files. Keep entries factual and concise. The runtime treats knowledge as
-reference data, not executable instructions.
+The competition does not provide its functional reference testbench to the
+agent. Do not add a model-generated testbench or describe local lint/synthesis
+as proof of functional correctness. The submission artifact is the DUT RTL in
+`solution.v`.

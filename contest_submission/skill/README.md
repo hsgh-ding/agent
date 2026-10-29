@@ -2,8 +2,8 @@
 
 技能包是领域知识的组织形式。它不是提示词的堆叠，评价标准只有一条：**他人能否照着用。**
 
-本目录只放了一条技能作为格式示范。一份有竞争力的提交通常有 5–15 条，且每一条都能
-指出它是从哪些失败样本中总结出来的。
+技能应按任务和错误类别择需加载，不把所有内容堆进每次提示词。每条技能要简短、可执行，
+并尽量能指出它对应的失败样本或明确规则；条数本身不代表质量。
 
 ---
 
@@ -17,11 +17,23 @@
 
 官方技能仓库（AMD Ross）：https://github.com/Xilinx/ross-ai-assistant
 
-其中 HLS 系列技能不依赖 MCP；`vivado-*` 系列的操作步骤调用 Vivado MCP 工具，未部署 MCP
-时须改写为命令行调用。详见 `docs/FAQ.md`。
+该仓库同时提供 Vitis HLS 与 Vivado RTL 技能。当前提交包把
+`vivado-rtl-elaboration-analysis` 的首错定位与最小修复方法适配进
+`vivado-synthesis-diagnostics/SKILL.md`；它保留 AMD 的 MIT 版权/许可标识，并把 MCP 专用步骤
+改写为比赛容器现有的本地 `xvlog`、`xelab` 和 Vivado batch synthesis 流程。HLS 架构技能不适用
+本次 RTL-only 隐藏测试台流程，所以没有加载进竞赛运行时。
 
-需注意官方技能主要面向 HLS，RTL 侧的技能大多需自行编写，这既是负担亦是机会，因为
-本 track 的工程质量项正是看这个。
+公开研究参考：
+
+- RTLFixer：检索加编译反馈的有限修复循环，https://arxiv.org/abs/2311.16543
+- VerilogEval：用 golden simulation 评估 RTL 行为，https://arxiv.org/abs/2309.07544
+- VerilogEval 更新版：提示工程和失败分类对结果重要，https://arxiv.org/abs/2408.11053
+
+这里只把方法作为设计依据，不将论文报告数字当作本方案成绩。实际效果要由同模型、同题集的
+官方判定器 A/B 结果确认。
+
+Ross 仓库覆盖 HLS 与 Vivado RTL。此提交只采用和比赛运行环境兼容的 RTL elaboration
+诊断原则；要求 Vivado MCP 的完整交互流程、HLS C++ 架构流程与隐藏测试台无关，未加入运行时。
 
 ---
 
@@ -114,7 +126,7 @@ frontmatter 只有 `name` 与 `description` 两项，其余信息放正文，这
 | 多驱动           | 同一信号在两个 `always` 块里赋值                           | L2         |
 | 不可综合构造     | `real`、延时、文件 IO、`fork/join`                         | L2         |
 | 题面含图         | 波形图、状态转移图在纯文本题面里丢失信息                   | L0 / L1    |
-| 自我验证         | 拿不到参考测试台时如何判断自己写对了                       | 这一项决定 L1 → L2 |
+| 功能正确性       | 把题面转成逐拍行为和边界条件；官方隐藏测试台负责最终判定    | L1 → L2；提交 Agent 无参考测试台 |
 
-最后一行是本赛道 L1 → L2 那 0.5 系数差的所在，是全表最大的一跳，也是官方技能包
-完全未覆盖的部分，因为该问题并非 RTL 问题，而是智能体设计问题。
+官方功能测试台不会下发给 Agent，因此提交程序无法用独立 oracle 完成 L2 自测。
+本技能包只能帮助模型准确提取逐拍语义与边界条件；本地 lint/综合通过不能代替官方仿真判定。
