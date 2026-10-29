@@ -16,6 +16,11 @@ ROOT_FILES = {".gitignore", ".gitattributes", "Dockerfile", "README.md", "REPORT
 SUFFIXES = {".py", ".md", ".json", ".sh", ".txt", ".toml", ".ps1", ".v", ".sv", ".vh", ".svh"}
 REQUIRED = {"run.sh", "run_baseline.sh", "baseline.py", "manifest.json",
             "serve/start.sh", "model/MODEL.md",
+            "agent/main.py", "tests/test_submission.py", "tools/check_submission.py",
+            "agent/review.py", "agent/prompts/review.md", "agent/prompts/semantic_repair.md",
+            "skill/rtl-design-checklist/SKILL.md", "skill/rtl-fsm-and-widths/SKILL.md",
+            "skill/rtl-module-interface-contract/SKILL.md", "skill/rtl-reset-and-clock/SKILL.md",
+            "skill/vivado-synthesis-diagnostics/SKILL.md",
             "dev/local_agent/main.py", "dev/local_agent/rtl_agent/chat.py",
             "dev/local_agent/rtl_agent/vivado.py"}
 

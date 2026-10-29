@@ -1,4 +1,4 @@
-## Review the existing candidate against the task
+## Inspect the candidate against the task and report concrete checks
 
 {{NOTICE}}
 
@@ -6,23 +6,26 @@
 {{CODE}}
 ```
 
-Check actual behavior, not comments or synthesis success:
-- Work out concrete input/output examples: zero, a single active input bit,
-  maximum values, and any task-specific boundary. Verify the requested operation.
-- Calculate each concatenation's width and which bits survive assignment. Check
-  arithmetic carry/overflow and bitwise versus arithmetic operations.
-- For clocked logic, trace reset and several active edges using the OLD register
-  values on the right of nonblocking assignments. Check output latency, pulse
-  clearing, enable/load priority, state mismatch transitions and allowed overlap.
-- Check that each register has one driver. Treat warnings as evidence to inspect,
-  not as automatic proof of a functional error. Intentional truncation is legal.
+This is a review-report stage. Return only JSON with 1..6 short checks:
+{"checks":[{"requirement":"verbatim task/interface quote","source":"verbatim current RTL fragment","case":"concrete input values or a short input/cycle sequence","expected":"outcome required by the task","observed":"outcome computed from this RTL","status":"match|mismatch|uncertain"}]}
 
-Change behavior only if you can identify a specific mismatch with the task or
-structural fault; first work out a concrete failing input or cycle sequence.
-Do not invent requirements when the task is ambiguous. If no defect is found,
-return only {"decision":"keep"}. Otherwise prefer a small JSON response:
-{"reason":"specific defect or counterexample","edits":[{"search":"exact old text","replace":"corrected text"}]}
-Each search must match exactly once; include surrounding lines if necessary.
-No filesystem paths or executable commands. The caller applies all edits
-atomically and rechecks the result. A complete corrected RTL file in one
-```verilog block is accepted as a fallback. Never output a testbench.
+Derive the expected outcome from the task, separately from computing the RTL's
+outcome. Report concise results, not internal deliberations. Do not use comments,
+successful compilation, or successful synthesis as evidence of correct behavior.
+Choose the checks that distinguish a correct implementation from plausible bugs:
+- Combinational logic: cover a normal case and relevant zero, maximum, signed,
+  carry, priority or width boundary; account for truncation and extension.
+- Clocked logic: cover the specified reset, a normal transition and the first
+  output cycle; evaluate nonblocking right-hand sides using the OLD state.
+  Inspect enable/load priority, pulse clearing and overlap only when relevant.
+- Cover distinct requested behaviors, not six restatements of one easy case.
+
+Use identical concise expected/observed values for match, different comparable
+values for mismatch. Mark uncertain if the task leaves an outcome unspecified
+or you cannot determine it. Do not invent requirements or a clock/reset/latency.
+Every requirement and source quote must occur in the supplied task/interface
+and current RTL. References are reminders, not additional task requirements.
+
+Do not return KEEP, edits, rewritten RTL, executable commands or a testbench.
+The caller checks report anchors, records these as MODEL CLAIMS (not simulation
+results), and requests a separate targeted repair only for reported mismatches.

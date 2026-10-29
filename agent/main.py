@@ -21,6 +21,7 @@ import time
 from .llm import LLM, LLMError, extract_code
 from .advisory import rtl_review_hints
 from .edits import decode_edit_reply, EditError
+from .review import parse_review, ReviewError
 from .retrieval import retrieve
 from .skills import load_skills, select
 from .verification import VerificationCache
@@ -37,6 +38,8 @@ MAX_ROUNDS = int(os.environ.get("AGENT_MAX_ROUNDS", "4"))
 # A single specification review, not an open-ended rewrite loop. Set to 0 only
 # for an A/B ablation; both variants keep the official baseline untouched.
 BEHAVIOR_REVIEW = os.environ.get("AGENT_BEHAVIOR_REVIEW", "1") != "0"
+# Legacy is retained only for an A/B comparison of the previous self-review.
+REVIEW_MODE = os.environ.get("AGENT_REVIEW_MODE", "evidence").strip().lower()
 DEADLINE_S = float(os.environ.get("AGENT_DEADLINE_S", "900"))
 # 为写出结果预留的余量。
 RESERVE_S = float(os.environ.get("AGENT_RESERVE_S", "20"))
@@ -117,12 +120,16 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
     trace.write(tool="env", vivado_available=rtl.available, reason=rtl.reason or None)
 
     skills = load_skills(SKILL_DIR)
-    trace.write(tool="skills", loaded=[s.name for s in skills])
+    trace.write(tool="skills", loaded=[s.name for s in skills], directory=SKILL_DIR)
+    if not skills:
+        trace.write(tool="skills", event="warning", reason="no skills loaded; check source package upload")
 
     system = read_prompt_file("system.md")
     seed_system = read_prompt_file("seed.md").replace("{{TOP}}", top)
     repair_tpl = read_prompt_file("repair.md")
-    behavior_review_tpl = read_prompt_file("review.md")
+    semantic_repair_tpl = read_prompt_file("semantic_repair.md")
+    evidence_review = REVIEW_MODE != "legacy"
+    behavior_review_tpl = read_prompt_file("review.md" if evidence_review else "review_legacy.md")
 
     started = time.time()
     best = ""
@@ -133,6 +140,7 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
     last_error_class = "none"
     request_timeout = llm.timeout_s
     behavior_review_done = False
+    review_format_failures = 0
 
     for rnd in range(1, MAX_ROUNDS + 1):
         remaining = DEADLINE_S - (time.time() - started) - RESERVE_S
@@ -140,8 +148,13 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
             trace.write(tool="budget", event="stop", round=rnd, reason="deadline")
             break
 
-        messages = [{"role": "system", "content": system if last_log else seed_system}]
         is_review = last_stage == "behavioral_review"
+        is_semantic_repair = last_stage == "semantic_repair"
+        review_system = ("You are reviewing an existing RTL candidate. The user specifies "
+                         "the JSON report contract. Report concise, source-grounded checks; "
+                         "do not edit RTL or output KEEP. Tool success is not functional evidence.")
+        messages = [{"role": "system", "content": review_system if is_review and evidence_review
+                     else system if last_log else seed_system}]
         auto_repair_signal = ""
 
         user = build_task_block(prompt, interface)
@@ -150,14 +163,17 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
         # Start with the task itself, close to a bare-model generation. Skills
         # and retrieval are brought in only when inspecting an actual candidate
         # or diagnostic, so unrelated advice cannot dominate the first attempt.
-        chosen = select(skills, prompt, last_log, limit=2) if last_log else []
+        # A passing tool's generic warning must not route a functional review
+        # into synthesis/debugging references. Keep real errors on repair paths.
+        routing_log = "" if is_review or last_stage == "semantic_repair" else last_log
+        chosen = select(skills, prompt, routing_log, limit=2) if last_log else []
         if chosen:
             user += "\n\n## Optional task/diagnostic reference\n"
             user += "\n\n".join(s.render(context=prompt) for s in chosen)
             trace.write(tool="skills", event="inject", round=rnd,
                         selected=[s.name for s in chosen])
 
-        notes = (retrieve(prompt + "\n" + last_log,
+        notes = (retrieve(prompt + "\n" + routing_log,
                           KNOWLEDGE_DIR, limit=2, max_chars=900,
                           task=prompt) if last_log else [])
         if notes:
@@ -172,6 +188,9 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
         if last_log:
             if last_stage == "behavioral_review":
                 user += "\n\n" + behavior_review_tpl.replace("{{NOTICE}}", last_log) \
+                                                     .replace("{{CODE}}", current)
+            elif last_stage == "semantic_repair":
+                user += "\n\n" + semantic_repair_tpl.replace("{{LOG}}", last_log) \
                                                      .replace("{{CODE}}", current)
             else:
                 user += "\n\n" + repair_tpl.replace("{{LOG}}", last_log) \
@@ -198,12 +217,49 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
             elapsed_s=round(time.time() - t0, 2),
         )
 
+        if is_review and evidence_review:
+            try:
+                checks = parse_review(result.text, prompt + "\n" + interface, current)
+            except ReviewError as exc:
+                review_format_failures += 1
+                trace.write(tool="spec_review", round=rnd, rc=1, excerpt=str(exc),
+                            functional_verified=False)
+                if review_format_failures >= 2:
+                    trace.write(tool="agent", event="accept", round=rnd,
+                                review="invalid_report_original_retained", functional_verified=False)
+                    return best or current
+                last_log += "\nReview format correction: " + str(exc)
+                continue
+            mismatches = [check for check in checks if check["status"] == "mismatch"]
+            uncertain = any(check["status"] == "uncertain" for check in checks)
+            outcome = "mismatch_claim" if mismatches else "uncertain" if uncertain else "match_claim"
+            trace.write(tool="spec_review", round=rnd, rc=0, outcome=outcome,
+                        checks=checks, functional_verified=False)
+            if not mismatches:
+                trace.write(tool="agent", event="accept", round=rnd,
+                            review="inconclusive" if uncertain else "source_grounded_review",
+                            functional_verified=False)
+                return best or current
+            last_log = (
+                "The review reported these possible mismatches. They are model claims, "
+                "NOT executed tests. Confirm each against the task and current RTL. "
+                "Fix only confirmed errors with minimal edits; do not add behavior or ports. "
+                "If the claims are wrong, return the existing RTL unchanged.\n" +
+                json.dumps(mismatches, ensure_ascii=False)
+            )
+            last_stage = "semantic_repair"
+            last_error_class = "source-grounded reviewer mismatch claim (not a simulator verdict)"
+            trace.write(tool="agent", event="request_semantic_repair", round=rnd,
+                        claims=len(mismatches))
+            continue
+
         try:
             edit_result = decode_edit_reply(result.text, current, allow_keep=is_review)
         except EditError as exc:
             trace.write(tool="edit_validation", round=rnd, rc=1, excerpt=str(exc))
             last_log = _with_note(last_log, str(exc))
-            last_stage = "behavioral_review" if is_review else "edit_format"
+            last_stage = ("semantic_repair" if is_semantic_repair else
+                          "behavioral_review" if is_review else "edit_format")
             last_error_class = "局部修改格式或锚点无效"
             continue
         if edit_result is not None:
@@ -216,8 +272,9 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
             trace.write(tool="extract", round=rnd, rc=1,
                         excerpt="no code block in reply")
             format_notice = "上一轮回复中没有找到代码块。只输出一个 ```verilog 代码块，不要加解释。"
-            last_log = last_log + "\n" + format_notice if is_review else format_notice
-            last_stage = "behavioral_review" if is_review else "generation"
+            last_log = last_log + "\n" + format_notice if is_review or is_semantic_repair else format_notice
+            last_stage = ("semantic_repair" if is_semantic_repair else
+                          "behavioral_review" if is_review else "generation")
             last_error_class = "输出格式"
             continue
 
@@ -227,6 +284,11 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
                     selected_modules=module_names, expected_top=top)
 
         if current and code == current and last_log:
+            if is_semantic_repair:
+                trace.write(tool="agent", event="accept", round=rnd,
+                            review="claim_not_confirmed", functional_verified=False,
+                            reason="repair retained the checked source instead of acting on the review claim")
+                return best or current
             if is_review:
                 trace.write(tool="agent", event="accept", round=rnd,
                             review="unchanged", functional_verified=False,
@@ -414,7 +476,8 @@ def main(argv: list[str] | None = None) -> int:
         prompt, interface = read_task(args.input)
         llm = LLM()
         trace.write(tool="agent", event="start", mode="agent",
-                    llm=llm.describe(), deadline_s=DEADLINE_S)
+                    llm=llm.describe(), deadline_s=DEADLINE_S,
+                    behavior_review=BEHAVIOR_REVIEW, review_mode=REVIEW_MODE)
 
         top = args.top or infer_top(interface, prompt)
         code = solve_agent(llm, trace, prompt, interface, top,

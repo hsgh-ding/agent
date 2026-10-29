@@ -7,6 +7,9 @@ OFFICIAL="${OFFICIAL:-/workspace/rtlagent2026}"
 OUT="${OUT:-/var/tmp/rtl-compare-$(date +%Y%m%d_%H%M%S)}"
 SAMPLES="${SAMPLES:-1}"
 
+cd "$TEAM"
+python3 "$TEAM/tools/check_submission.py"
+
 test -f "$OFFICIAL/selftest/run_selftest.sh" || {
   echo "Official selftest not found: $OFFICIAL/selftest/run_selftest.sh" >&2
   exit 1
@@ -20,6 +23,7 @@ export MODEL_NAME="$LLM_MODEL"
 export LLM_MAX_TOKENS="${LLM_MAX_TOKENS:-16384}"
 export LLM_TEMPERATURE=0.0
 export AGENT_BEHAVIOR_REVIEW="${AGENT_BEHAVIOR_REVIEW:-1}"
+export AGENT_REVIEW_MODE="${AGENT_REVIEW_MODE:-evidence}"
 export AGENT_TMP="${AGENT_TMP:-/var/tmp}"
 export EDA_TMP="${EDA_TMP:-/var/tmp/eda}"
 export SELFTEST_TMP="${SELFTEST_TMP:-/var/tmp}"
@@ -31,12 +35,15 @@ mkdir -p "$AGENT_TMP" "$EDA_TMP" "$SELFTEST_TMP"
 # before spending time on a run that would not use the declared real model.
 if [ -f "$OFFICIAL/selftest/env.sh" ]; then
   if ! bash -c '
+    AGENT_DIR="$4"
+    OUT_DIR="$5"
     source "$1" >/dev/null 2>&1
     [ "${LLM_BACKEND:-mock}" = openai ] &&
-    [ "${LLM_MODEL:-}" = "$2" ] && [ "${LLM_BASE_URL:-}" = "$3" ]
-  ' bash "$OFFICIAL/selftest/env.sh" "$LLM_MODEL" "$LLM_BASE_URL"; then
-    echo "Official selftest/env.sh overrides the real-model settings." >&2
-    echo "Set LLM_BACKEND=openai, LLM_MODEL=$LLM_MODEL and LLM_BASE_URL=$LLM_BASE_URL there, then rerun." >&2
+    [ "${LLM_MODEL:-}" = "$2" ] && [ "${LLM_BASE_URL:-}" = "$3" ] &&
+    [ "$AGENT_DIR" = "$4" ] && [ "$OUT_DIR" = "$5" ]
+  ' bash "$OFFICIAL/selftest/env.sh" "$LLM_MODEL" "$LLM_BASE_URL" "$TEAM" "$OUT"; then
+    echo "Official selftest/env.sh overrides model settings or AGENT_DIR/OUT_DIR." >&2
+    echo "Use LLM_BACKEND=openai, LLM_MODEL=$LLM_MODEL, LLM_BASE_URL=$LLM_BASE_URL; remove stale AGENT_DIR/OUT_DIR assignments." >&2
     exit 1
   fi
 fi
@@ -55,8 +62,6 @@ done
 
 # The official driver executes these two scripts directly.
 chmod u+x "$TEAM/run.sh" "$TEAM/run_baseline.sh"
-cd "$TEAM"
-python3 -m unittest discover -s tests -v
 python3 - <<'PY'
 import json
 import os
@@ -77,4 +82,5 @@ PY
 cd "$OFFICIAL/selftest"
 echo "Results: $OUT"
 bash ./run_selftest.sh --tasks "$OFFICIAL/tasks" --agent "$TEAM" --out "$OUT" --samples "$SAMPLES"
+python3 "$TEAM/tools/check_submission.py" --results "$OUT"
 echo "Score: $OUT/score.json"
