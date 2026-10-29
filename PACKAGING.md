@@ -34,20 +34,21 @@ ZIP 解压后直接看到 `run.sh`、`agent/`、`dev/`，不会多套一层目�
 
 ## 更新你的 GitHub 和 Jupyter
 
-你的 GitHub 仓库 `hsgh-ding/agent` 把比赛包放在 `contest_submission/` 下。
-将本目录内容覆盖到仓库里**已有的** `contest_submission/`，不要覆盖到仓库根目录，
-也不要生成 `contest_submission/contest_submission/`。
-如果旧仓库还有 `contest_submission/agent/rtl_agent/`、`contest_submission/agent/skills/`
+你的 GitHub 仓库 `hsgh-ding/agent` 现在直接把比赛包放在仓库根目录。
+将本目录内容覆盖到仓库根目录；Jupyter 上对应 `/workspace/agent/`，不要再加
+`contest_submission/` 一层。必须完整上传 `agent/`、`skill/`、`tests/` 和 `tools/` 等目录。
+如果旧仓库还有 `agent/rtl_agent/`、`agent/skills/`
 或提交过的 `__pycache__/`，同步删除这些旧文件；网页覆盖上传不会自动删除它们。
 
 提交并推送后，在 JupyterLab Terminal 中运行：
 
 ```bash
+git config --global --add safe.directory /workspace/agent
 cd /workspace/agent
-git pull --ff-only
-cd contest_submission
+git pull --ff-only && (
 chmod +x run.sh run_baseline.sh serve/*.sh
-python3 -m unittest discover -s tests -v
+python3 tools/check_submission.py
+)
 ```
 
 完整的 Qwen3-8B/vLLM 和官方评测操作见 `JUPYTER_GUIDE.md`。

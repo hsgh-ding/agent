@@ -4,16 +4,17 @@
 
 ## 已配置好 Qwen3-8B 后，复测本次修复
 
-先把本地最新 `contest_submission/` 提交并推送到 GitHub，或将新的源代码 ZIP 解压覆盖到
-`/workspace/agent/contest_submission/`。本地修改不会自动同步到 Jupyter。服务已经启动时执行：
+先把本地最新提交包的**内容**提交到 GitHub 仓库根目录并推送，或将新的源代码 ZIP 解压覆盖到
+`/workspace/agent/`。本地修改不会自动同步到 Jupyter。服务已经启动时执行：
 
 ```bash
+git config --global --add safe.directory /workspace/agent
 cd /workspace/agent
-git pull --ff-only
-bash /workspace/agent/contest_submission/tools/retest_jupyter.sh
+git pull --ff-only && OFFICIAL=/workspace/rtlagent2026 bash ./tools/retest_jupyter.sh
 ```
 
-脚本检查官方 `env.sh` 没覆盖真实模型配置，跑包内测试并确认 8000 端口返回 `Qwen3-8B`，
+脚本确认当前提交根目录、非零数量的包内测试及声明的技能文件完整，再检查官方 `env.sh`
+没覆盖模型或 AGENT_DIR/OUT_DIR 配置，并确认 8000 端口返回 `Qwen3-8B`，
 再调用官方自测，Agent 和 baseline 一起跑。
 新结果写入单独的 `/var/tmp/rtl-compare-日期_时间/`，保留旧结果用于比较。若模型服务没启动，
 先按第 4 节启动；脚本不会改用 mock。若提示 `env.sh overrides`，打开
@@ -21,17 +22,21 @@ bash /workspace/agent/contest_submission/tools/retest_jupyter.sh
 `Qwen3-8B`、`LLM_BASE_URL` 设为 `http://127.0.0.1:8000/v1`，再重跑。
 
 看汇总里的 **Agent pass@1 与 baseline pass@1**，以及每题是否从 L1 到 L3；只看到包内测试
-通过不能判断分数提高。每题的 `trace.jsonl` 应出现一次 `request_behavior_review`，若复核原样
-返回则 `accept` 中有 `review: unchanged`。功能正确性仍以官方 judge 为准。
-新版还支持局部修改和简短 KEEP；可在 trace 中查看 `edit_validation`。`verification_cache`
+通过不能判断分数提高。每题的 `trace.jsonl` 应出现一次 `request_behavior_review`，默认复核的
+`spec_review` 记录题面/源码引用与具体检查。`match_claim`/`mismatch_claim` 都是模型判断，
+不是仿真结论；后者触发 `request_semantic_repair`，修改后重新检查。功能正确性仍以官方 judge 为准。
+非法报告最多纠正一次；`invalid_report_original_retained` 表示没有拿到有效报告，保留原代码。
+新版支持局部修改，可在 trace 中查看 `edit_validation`。`verification_cache`
 表示相同源码的检查结果被复用，实际工具调用不重复计数。
 
-仅做复核消融时，可再用 `AGENT_BEHAVIOR_REVIEW=0 bash .../tools/retest_jupyter.sh` 跑同一题集；
-恢复默认用 `AGENT_BEHAVIOR_REVIEW=1`。这只比较本次功能复核的影响，不替代改版前后的对照。
+比较旧自查与新报告时，分别用 `AGENT_REVIEW_MODE=legacy bash tools/retest_jupyter.sh` 和
+`AGENT_REVIEW_MODE=evidence bash tools/retest_jupyter.sh` 跑同一题集；用
+`AGENT_BEHAVIOR_REVIEW=0 bash tools/retest_jupyter.sh` 可关闭复核。保持模型配置一致，比较
+各次官方成绩、退化题数和耗时；三道题的一次结果只能作初步检查，不能证明普遍提升。
 
 ## 1. 确认仓库目录
 
-你的 GitHub 仓库是 `hsgh-ding/agent`，提交包在仓库内的 `contest_submission/` 子目录。若还没克隆：
+你的 GitHub 仓库是 `hsgh-ding/agent`，提交入口直接在仓库根目录。若还没克隆：
 
 ```bash
 cd /workspace
@@ -48,19 +53,19 @@ git clone https://gitee.com/Vickyiii/rtlagent2026.git /workspace/rtlagent2026
 
 ```bash
 REPO=/workspace/agent
-TEAM="$REPO/contest_submission"
+TEAM="$REPO"
 OFFICIAL=/workspace/rtlagent2026
 TASK="$OFFICIAL/tasks/ex03_lfsr8"
 test -f "$TEAM/run.sh" && test -f "$TEAM/manifest.json" && test -f "$TASK/prompt.txt" && echo "路径正确"
 ```
 
-如果你在 Windows 工作区看到的文件改动还没有提交并推送到 GitHub，Jupyter 克隆到的仍会是旧代码。先把最新 `contest_submission/` 上传到仓库；仓库已克隆时这样更新：
+如果 Windows 的改动还没推送到 GitHub，Jupyter 克隆到的仍是旧代码。将最新提交包内容上传到仓库根目录；仓库已克隆时这样更新：
 
 ```bash
+git config --global --add safe.directory /workspace/agent
 cd /workspace/agent
-git pull --ff-only
-TEAM=/workspace/agent/contest_submission
-python3 -m unittest discover -s "$TEAM/tests" -v
+git pull --ff-only && python3 tools/check_submission.py
+TEAM=/workspace/agent
 ```
 
 这一步只跑包内单元测试，不需要 GPU 或模型。真实模型 A/B 测试请等第 4–5 节启动 Qwen 服务并
@@ -212,10 +217,8 @@ MODEL_NAME=Qwen3-8B \
 ```
 
 查看终端末尾的 Agent/baseline pass@1 与归一化增益，并检查
-`/var/tmp/rtl-ross-repair/score.json`。本次修改针对先前 `ex02_detect_1101` 的
-`VRFC 10-1280` 编译错误；单元测试通过不代表真实模型输出正确，必须用这一步确认该题是否从
-L0 升到 L1/L2/L3，以及整体题集分是否超过 baseline。输出端口类型修复后的模型复核只是第二次
-静态推理，最终功能仍以官方判定器结果为准。
+`/var/tmp/rtl-ross-repair/score.json`。单元测试通过不代表真实模型输出正确，必须用这一步比较
+整体题集分及逐题等级是否超过 baseline。模型复核仍是静态推理，最终功能以官方判定器为准。
 
 如果某题只用了 2–3 秒就得到 L0，先看 Agent 现场而不是继续调提示词：
 
@@ -223,9 +226,10 @@ L0 升到 L1/L2/L3，以及整体题集分是否超过 baseline。输出端口�
 find /var/tmp/rtl-ross-repair -name trace.jsonl -o -name solution.v | sort
 
 # 把下面两个路径替换成对应题目的实际文件
-cat /var/tmp/rtl-ross-repair/agent/ex01_popcount8/trace.jsonl
-wc -c /var/tmp/rtl-ross-repair/agent/ex01_popcount8/solution.v
-cat /var/tmp/rtl-ross-repair/agent/ex01_popcount8/solution.v
+cat /var/tmp/rtl-ross-repair/agent/ex01_popcount8/s0/run.log
+cat /var/tmp/rtl-ross-repair/agent/ex01_popcount8/s0/trace.jsonl
+wc -c /var/tmp/rtl-ross-repair/agent/ex01_popcount8/s0/solution.v
+cat /var/tmp/rtl-ross-repair/agent/ex01_popcount8/s0/solution.v
 ```
 
 重点看 `trace.jsonl`：`llm rc=1` 表示模型请求失败，`extract rc=1` 表示模型没有可抽取
@@ -302,7 +306,7 @@ Hugging Face token，也不是 LLM API key。不要把它写入 Git 或提交包
 
 ```bash
 source /workspace/env.sh 2>/dev/null || true
-cd /workspace/agent/contest_submission
+cd /workspace/agent
 export FPGACHINA_TOKEN='赛事方令牌'
 export MODEL_NAME=Qwen3-8B
 export MODEL=/workspace/models/Qwen3-8B

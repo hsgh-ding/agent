@@ -36,9 +36,10 @@
   "agent": {
     "max_rounds": 4,
     "initial_generation": "baseline-style task-only seed; references reserved for repair/review",
-    "behavior_review": "one bounded specification review after first successful synthesis",
+    "behavior_review": "bounded source-grounded JSON checks after first successful synthesis; mismatch claims trigger separate targeted repair; not simulation",
+    "review_modes": "evidence (default), legacy (ablation), or AGENT_BEHAVIOR_REVIEW=0 to disable",
     "source_advisories": "literal-width concatenation truncation/extension; advisory only",
-    "repair_output": "exact-anchor edits or complete RTL; unchanged review can return KEEP",
+    "repair_output": "exact-anchor edits or complete RTL; evidence review returns checks, not KEEP or rewritten RTL",
     "verification_cache": "per-task exact source/stage/top; no reuse of transient failures",
     "tools": [
       "check_interface",
