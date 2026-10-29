@@ -2,6 +2,33 @@
 
 下面命令在 JupyterLab 的 **Terminal** 里运行，不是在本地 Windows 终端。流程是：先测脚本链路，再启动模型写一道题，最后用官方判定器给 RTL 打 L1/L2/L3。
 
+## 已配置好 Qwen3-8B 后，复测本次修复
+
+先把本地最新 `contest_submission/` 提交并推送到 GitHub，或将新的源代码 ZIP 解压覆盖到
+`/workspace/agent/contest_submission/`。本地修改不会自动同步到 Jupyter。服务已经启动时执行：
+
+```bash
+cd /workspace/agent
+git pull --ff-only
+bash /workspace/agent/contest_submission/tools/retest_jupyter.sh
+```
+
+脚本检查官方 `env.sh` 没覆盖真实模型配置，跑包内测试并确认 8000 端口返回 `Qwen3-8B`，
+再调用官方自测，Agent 和 baseline 一起跑。
+新结果写入单独的 `/var/tmp/rtl-compare-日期_时间/`，保留旧结果用于比较。若模型服务没启动，
+先按第 4 节启动；脚本不会改用 mock。若提示 `env.sh overrides`，打开
+`/workspace/rtlagent2026/selftest/env.sh`，将 `LLM_BACKEND` 设为 `openai`、`LLM_MODEL` 设为
+`Qwen3-8B`、`LLM_BASE_URL` 设为 `http://127.0.0.1:8000/v1`，再重跑。
+
+看汇总里的 **Agent pass@1 与 baseline pass@1**，以及每题是否从 L1 到 L3；只看到包内测试
+通过不能判断分数提高。每题的 `trace.jsonl` 应出现一次 `request_behavior_review`，若复核原样
+返回则 `accept` 中有 `review: unchanged`。功能正确性仍以官方 judge 为准。
+新版还支持局部修改和简短 KEEP；可在 trace 中查看 `edit_validation`。`verification_cache`
+表示相同源码的检查结果被复用，实际工具调用不重复计数。
+
+仅做复核消融时，可再用 `AGENT_BEHAVIOR_REVIEW=0 bash .../tools/retest_jupyter.sh` 跑同一题集；
+恢复默认用 `AGENT_BEHAVIOR_REVIEW=1`。这只比较本次功能复核的影响，不替代改版前后的对照。
+
 ## 1. 确认仓库目录
 
 你的 GitHub 仓库是 `hsgh-ding/agent`，提交包在仓库内的 `contest_submission/` 子目录。若还没克隆：

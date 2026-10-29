@@ -1,0 +1,165 @@
+{
+  "date": "2026-10-29",
+  "component": "local-chat-development-agent",
+  "competition_entrypoint": "../../run.sh",
+  "configuration_adjustments": {
+    "config.example.json": {
+      "vivado": "vivado",
+      "run_root": "runs"
+    }
+  },
+  "files": {
+    "config.example.json": {
+      "source_sha256": "7b4178921147f82993f538ddf51ad8b5cbe30dadb1e6d1de9ec7a8b78c224120",
+      "packaged_sha256": "d36fa89acc52174c9eb667d8db98f9978548aef4a336537e9f056a36f2b50c9a"
+    },
+    "examples/counter.md": {
+      "source_sha256": "6c675b8651d9f69fc1c3e2dac647298b9e351a4457f3a0bb5e38d82fd80d466d",
+      "packaged_sha256": "6c675b8651d9f69fc1c3e2dac647298b9e351a4457f3a0bb5e38d82fd80d466d"
+    },
+    "examples/counter_tb.sv": {
+      "source_sha256": "8ba026d1e53438fa7d8f54be10c44f5da697892cd9e7299e5296f9609eefe862",
+      "packaged_sha256": "8ba026d1e53438fa7d8f54be10c44f5da697892cd9e7299e5296f9609eefe862"
+    },
+    "knowledge/context-and-files.md": {
+      "source_sha256": "2763592eea9f79886bf530d2fb6e78555ba422f4c18f738c0852f327725bdc90",
+      "packaged_sha256": "2763592eea9f79886bf530d2fb6e78555ba422f4c18f738c0852f327725bdc90"
+    },
+    "knowledge/ollama-qwen3.md": {
+      "source_sha256": "bbd2e3fa9542883401f561357d688dd8c57643022b5b16fbc3f62b67d23c498b",
+      "packaged_sha256": "bbd2e3fa9542883401f561357d688dd8c57643022b5b16fbc3f62b67d23c498b"
+    },
+    "knowledge/README.md": {
+      "source_sha256": "260eb010ba279b9bcb5ffdc36f7b3c977f68de21989b5bfcbb4805e8fd68136c",
+      "packaged_sha256": "260eb010ba279b9bcb5ffdc36f7b3c977f68de21989b5bfcbb4805e8fd68136c"
+    },
+    "knowledge/testbench.md": {
+      "source_sha256": "6082b59ee6e28bc704bfd0b7419e4d97e214199c3cd64210d54cb651204c7caa",
+      "packaged_sha256": "6082b59ee6e28bc704bfd0b7419e4d97e214199c3cd64210d54cb651204c7caa"
+    },
+    "knowledge/verification-workflow.md": {
+      "source_sha256": "57de4b304078bed18d04755f23d4446e2659e4edb9f1221cff63458d970c7199",
+      "packaged_sha256": "57de4b304078bed18d04755f23d4446e2659e4edb9f1221cff63458d970c7199"
+    },
+    "knowledge/verilog-coding.md": {
+      "source_sha256": "9d3cd889a14fb825934afd277db4459a7d7c6a5914e0b1500dd1e1a1d044e95d",
+      "packaged_sha256": "9d3cd889a14fb825934afd277db4459a7d7c6a5914e0b1500dd1e1a1d044e95d"
+    },
+    "knowledge/vivado-diagnostics.md": {
+      "source_sha256": "9b280c2fd86c4d6e51de5c967e149cccc871ce3888ce30c90d19c5b2f5b03a30",
+      "packaged_sha256": "9b280c2fd86c4d6e51de5c967e149cccc871ce3888ce30c90d19c5b2f5b03a30"
+    },
+    "main.py": {
+      "source_sha256": "cfc7c0b9f597dc399d15fc987c7a46cc672f592ede7cb14ee997233e343d9b4b",
+      "packaged_sha256": "cfc7c0b9f597dc399d15fc987c7a46cc672f592ede7cb14ee997233e343d9b4b"
+    },
+    "pyproject.toml": {
+      "source_sha256": "1a3c54b76638ba36484b7702a38087be883f8997b677b79af891db984a748903",
+      "packaged_sha256": "1a3c54b76638ba36484b7702a38087be883f8997b677b79af891db984a748903"
+    },
+    "README.md": {
+      "source_sha256": "3376731bb020b3f73c5a740fd49bc355c1178bd19cc2448788e635e4148bdbd1",
+      "packaged_sha256": "3376731bb020b3f73c5a740fd49bc355c1178bd19cc2448788e635e4148bdbd1"
+    },
+    "rtl_agent/__init__.py": {
+      "source_sha256": "28e6d2fc499f7dd59ec2a22e3b0506e25d4de21f0f40b65bd0452fbba2b71699",
+      "packaged_sha256": "28e6d2fc499f7dd59ec2a22e3b0506e25d4de21f0f40b65bd0452fbba2b71699"
+    },
+    "rtl_agent/chat.py": {
+      "source_sha256": "ba0ccc66663e1e95db2d8554300e3f80ed199b3579a3de04e2ba3c107a252871",
+      "packaged_sha256": "ba0ccc66663e1e95db2d8554300e3f80ed199b3579a3de04e2ba3c107a252871"
+    },
+    "rtl_agent/chat_tools.py": {
+      "source_sha256": "3f4b83e3e278c65d1055a5e1c55e89395e9d503a6fe89e0c4ed00a2524622032",
+      "packaged_sha256": "3f4b83e3e278c65d1055a5e1c55e89395e9d503a6fe89e0c4ed00a2524622032"
+    },
+    "rtl_agent/cli.py": {
+      "source_sha256": "7491e194f5eb8caec67d74ceb47ad22141c58e01f284a5fdb2913d7f730b1ade",
+      "packaged_sha256": "7491e194f5eb8caec67d74ceb47ad22141c58e01f284a5fdb2913d7f730b1ade"
+    },
+    "rtl_agent/config.py": {
+      "source_sha256": "004b13ce4d83311c14a73ed265745d98ebcf5f34103bd63f134594ccb1f60789",
+      "packaged_sha256": "004b13ce4d83311c14a73ed265745d98ebcf5f34103bd63f134594ccb1f60789"
+    },
+    "rtl_agent/context.py": {
+      "source_sha256": "b4bc241993d14be633cf39149e966504fe53afd8b48fd7c3fc40feccf6c22018",
+      "packaged_sha256": "b4bc241993d14be633cf39149e966504fe53afd8b48fd7c3fc40feccf6c22018"
+    },
+    "rtl_agent/demo.py": {
+      "source_sha256": "bacb47d0efad3bcf9c011747081ebec7cc8d737cac67e41f69ac2c2e920e73cd",
+      "packaged_sha256": "bacb47d0efad3bcf9c011747081ebec7cc8d737cac67e41f69ac2c2e920e73cd"
+    },
+    "rtl_agent/design.py": {
+      "source_sha256": "12bdc0d677b961410271ca10e31787a85b5e34cde00a1ad87da18d8d66a4bb77",
+      "packaged_sha256": "12bdc0d677b961410271ca10e31787a85b5e34cde00a1ad87da18d8d66a4bb77"
+    },
+    "rtl_agent/errors.py": {
+      "source_sha256": "3c8ba5f897ffe1888bb8528f2837a82f7cf0b6b5c2dfd3957a34f014b0f7c8c8",
+      "packaged_sha256": "3c8ba5f897ffe1888bb8528f2837a82f7cf0b6b5c2dfd3957a34f014b0f7c8c8"
+    },
+    "rtl_agent/knowledge.py": {
+      "source_sha256": "0d67ed94e0d1a071ed9a70887f20be3372a2635e3bc4cc24706eff5ea3cecb35",
+      "packaged_sha256": "0d67ed94e0d1a071ed9a70887f20be3372a2635e3bc4cc24706eff5ea3cecb35"
+    },
+    "rtl_agent/llm.py": {
+      "source_sha256": "8bd53874040c1488915597bc896ba58e6d6ad2a7ed325ddf196ef2c411e169bd",
+      "packaged_sha256": "8bd53874040c1488915597bc896ba58e6d6ad2a7ed325ddf196ef2c411e169bd"
+    },
+    "rtl_agent/storage.py": {
+      "source_sha256": "5184b61d24733855c752d288712a345d1114c77a6e9b10599e43e6d2653d7a64",
+      "packaged_sha256": "5184b61d24733855c752d288712a345d1114c77a6e9b10599e43e6d2653d7a64"
+    },
+    "rtl_agent/vivado.py": {
+      "source_sha256": "f8fa1f8fc9bd13940fbf053b2278ea2d6d6d5ddae1d92c0407d097c317fd8ed5",
+      "packaged_sha256": "f8fa1f8fc9bd13940fbf053b2278ea2d6d6d5ddae1d92c0407d097c317fd8ed5"
+    },
+    "rtl_agent/workflow.py": {
+      "source_sha256": "f14bc3ab71a15fc0a8bc695f153b203f734dc5db4392f0b0c2319649597067a2",
+      "packaged_sha256": "f14bc3ab71a15fc0a8bc695f153b203f734dc5db4392f0b0c2319649597067a2"
+    },
+    "rtl_agent/working_context.py": {
+      "source_sha256": "e6c8a4b301b4493f60ba231755c4b195b0dd02d080c53ce2b30030c49af772bf",
+      "packaged_sha256": "e6c8a4b301b4493f60ba231755c4b195b0dd02d080c53ce2b30030c49af772bf"
+    },
+    "skills/rtl-verification/SKILL.md": {
+      "source_sha256": "e496f75d2e3a3c583eda23ddc60e2ec8718a24ab302d2a1f7b2d3d0591a992f8",
+      "packaged_sha256": "e496f75d2e3a3c583eda23ddc60e2ec8718a24ab302d2a1f7b2d3d0591a992f8"
+    },
+    "start.ps1": {
+      "source_sha256": "15944067b4e0c90de56d6a457aed12788334c14e76810789e45b269a2bfc1bbc",
+      "packaged_sha256": "15944067b4e0c90de56d6a457aed12788334c14e76810789e45b269a2bfc1bbc"
+    },
+    "tests/ollama_smoke.py": {
+      "source_sha256": "f940c6018e65376485f355299ca39d8e22161db10e101abcc69d1aae8ca050a8",
+      "packaged_sha256": "f940c6018e65376485f355299ca39d8e22161db10e101abcc69d1aae8ca050a8"
+    },
+    "tests/test_agent.py": {
+      "source_sha256": "10736bc9c074086fe3801e1b2d7f1c585a02f36438c985f37536df296eb5c0ef",
+      "packaged_sha256": "10736bc9c074086fe3801e1b2d7f1c585a02f36438c985f37536df296eb5c0ef"
+    },
+    "tests/test_chat.py": {
+      "source_sha256": "9462007ad5329d5b5c36f4377a541a0cf4eff6ef14f8a764a1b7d21e728e6ed9",
+      "packaged_sha256": "9462007ad5329d5b5c36f4377a541a0cf4eff6ef14f8a764a1b7d21e728e6ed9"
+    },
+    "tests/test_http.py": {
+      "source_sha256": "cef768f25ea9406645f70ac74fc2b1e1785e4b240b205a2b4cf3aab70bcd4e5c",
+      "packaged_sha256": "cef768f25ea9406645f70ac74fc2b1e1785e4b240b205a2b4cf3aab70bcd4e5c"
+    },
+    "tests/test_knowledge.py": {
+      "source_sha256": "eb455934ee9ec60c0d4983dd4774e7f8ab668ee7e451d036a2e54147b75db12e",
+      "packaged_sha256": "eb455934ee9ec60c0d4983dd4774e7f8ab668ee7e451d036a2e54147b75db12e"
+    },
+    "tests/test_tool_agent.py": {
+      "source_sha256": "e5e1d24764ab5420bdd3ee80979ba4c9503e965c166cd7f84d2737bc886a0fb1",
+      "packaged_sha256": "e5e1d24764ab5420bdd3ee80979ba4c9503e965c166cd7f84d2737bc886a0fb1"
+    },
+    "tests/vivado_smoke.py": {
+      "source_sha256": "427e8c78702680e63b7d14f9f9bdca0d3bd52ca0119edf84e03b70b94b1d1a2b",
+      "packaged_sha256": "427e8c78702680e63b7d14f9f9bdca0d3bd52ca0119edf84e03b70b94b1d1a2b"
+    },
+    "VALIDATION.md": {
+      "source_sha256": "8341e00b1d4055e87bf65824fea66b0af2a6a8e9e8ed1ff93101cd23dfd9e0b2",
+      "packaged_sha256": "8341e00b1d4055e87bf65824fea66b0af2a6a8e9e8ed1ff93101cd23dfd9e0b2"
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "api_key_env": "OLLAMA_API_KEY",
+  "base_url": "http://127.0.0.1:11434/v1",
+  "model": "qwen3:8b",
+  "vivado": "vivado",
+  "run_root": "runs",
+  "top": "top",
+  "tb_top": "tb_top",
+  "part": "xczu3eg-sbva484-1-e",
+  "clocks": [
+    {
+      "port": "clk",
+      "period_ns": 5.0
+    }
+  ],
+  "simulation_ns": 10000,
+  "max_attempts": 4,
+  "max_chat_steps": 16,
+  "repeated_error_limit": 3,
+  "stage_timeout_seconds": 900,
+  "api_timeout_seconds": 600,
+  "api_retries": 2,
+  "context_window_tokens": 16384,
+  "max_output_tokens": 4096,
+  "context_safety_tokens": 2048,
+  "adaptive_output_tokens": false,
+  "ollama_context_tokens": 16384,
+  "ollama_think": false,
+  "ollama_show_reasoning": false,
+  "auto_verify": false,
+  "execution_mode": "tools",
+  "temperature": 0.1
+}
