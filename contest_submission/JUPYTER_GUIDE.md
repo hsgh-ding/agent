@@ -190,6 +190,21 @@ MODEL_NAME=Qwen3-8B \
 L0 升到 L1/L2/L3，以及整体题集分是否超过 baseline。输出端口类型修复后的模型复核只是第二次
 静态推理，最终功能仍以官方判定器结果为准。
 
+如果某题只用了 2–3 秒就得到 L0，先看 Agent 现场而不是继续调提示词：
+
+```bash
+find /var/tmp/rtl-ross-repair -name trace.jsonl -o -name solution.v | sort
+
+# 把下面两个路径替换成对应题目的实际文件
+cat /var/tmp/rtl-ross-repair/agent/ex01_popcount8/trace.jsonl
+wc -c /var/tmp/rtl-ross-repair/agent/ex01_popcount8/solution.v
+cat /var/tmp/rtl-ross-repair/agent/ex01_popcount8/solution.v
+```
+
+重点看 `trace.jsonl`：`llm rc=1` 表示模型请求失败，`extract rc=1` 表示模型没有可抽取
+代码，`candidate_rejected` 表示接口或源代码预检拒绝，`lint rc=1` 才是进入 Vivado 后的
+编译/展开失败。不要只看最终 L0，因为这四类原因的修复方向完全不同。
+
 确认单题链路正常后，再用 VerilogEval v2 的 20 道题做开发测试，先不要直接跑 156 道 × 5 次：
 
 ```bash

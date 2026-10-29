@@ -238,7 +238,7 @@ def strip_think(text: str) -> str:
     return text
 
 
-def extract_code(text: str) -> str:
+def extract_code(text: str, preferred_top: str | None = None) -> str:
     """Pull the Verilog out of a model reply.
 
     Models wrap code in fences with wildly inconsistent labels, and small models
@@ -247,10 +247,27 @@ def extract_code(text: str) -> str:
     """
     text = strip_think(text)
     blocks = re.findall(
-        r"```(?:systemverilog|verilog|sv|v|)\s*\n(.*?)```", text, re.DOTALL)
+        r"```(?:systemverilog|verilog|sv|v|)?\s*\n(.*?)```", text, re.DOTALL | re.IGNORECASE)
     if blocks:
-        # 取最长的代码块：模型常先回显接口。
-        return max(blocks, key=len).strip() + "\n"
+        # A model may emit an interface echo, an RTL candidate, and a testbench
+        # in one answer. Length alone is unsafe: a testbench is often the
+        # longest block. Prefer the requested top, one-module candidates, and
+        # blocks without simulation-only constructs; use length only as a final
+        # tie-breaker.
+        def rank(block: str) -> tuple[int, int, int, int]:
+            modules = re.findall(
+                r"\bmodule\s+([A-Za-z_$][A-Za-z0-9_$]*)\b", block,
+                re.IGNORECASE,
+            )
+            top_hit = int(bool(preferred_top and preferred_top in modules))
+            one_module = int(len(modules) == 1 and "endmodule" in block)
+            simulation_free = int(not re.search(
+                r"\binitial\b|\$(?:finish|fatal|display|monitor)\b|\bprogram\b|\binterface\b",
+                block, re.IGNORECASE,
+            ))
+            return top_hit, one_module, simulation_free, len(block)
+
+        return max(blocks, key=rank).strip() + "\n"
 
     # 无代码围栏时，若整体形似代码则全部取用。
     if "module" in text and "endmodule" in text:

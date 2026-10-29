@@ -73,6 +73,45 @@ class SubmissionSmokeTests(unittest.TestCase):
         self.assertIsNone(manifest["model"]["measured_vram_gb"])
         self.assertIsNone(manifest["serving"]["version"])
 
+    def test_code_extraction_prefers_requested_rtl_over_longer_testbench(self):
+        from agent.llm import extract_code
+
+        reply = """Here is my implementation.
+```verilog
+module TopModule(input a, output y); assign y = a; endmodule
+```
+```systemverilog
+module tb_top;
+  reg a;
+  wire y;
+  TopModule dut(.a(a), .y(y));
+  initial begin
+    a = 0;
+    #5 a = 1;
+    $finish;
+  end
+endmodule
+```
+"""
+        self.assertEqual(
+            extract_code(reply, preferred_top="TopModule"),
+            "module TopModule(input a, output y); assign y = a; endmodule\n",
+        )
+
+    def test_code_extraction_uses_requested_module_when_reply_has_two_candidates(self):
+        from agent.llm import extract_code
+
+        reply = """```verilog
+module Draft(input a, output y); assign y = 1'b0; endmodule
+```
+```systemverilog
+module TopModule(input a, output y);
+assign y = a;
+endmodule
+```
+"""
+        self.assertIn("module TopModule", extract_code(reply, preferred_top="TopModule"))
+
     def test_offline_retrieval_finds_gcd_and_reset_notes(self):
         from agent.retrieval import retrieve
 

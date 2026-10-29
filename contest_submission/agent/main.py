@@ -179,7 +179,7 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
             elapsed_s=round(time.time() - t0, 2),
         )
 
-        code = extract_code(result.text)
+        code = extract_code(result.text, preferred_top=top)
         if not code:
             trace.write(tool="extract", round=rnd, rc=1,
                         excerpt="no code block in reply")
@@ -187,6 +187,11 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
             last_stage = "generation"
             last_error_class = "输出格式"
             continue
+
+        module_names = re.findall(r"\bmodule\s+([A-Za-z_$][A-Za-z0-9_$]*)\b",
+                                  code, re.IGNORECASE)
+        trace.write(tool="extract", round=rnd, rc=0, bytes=len(code),
+                    selected_modules=module_names, expected_top=top)
 
         if current and code == current and last_log:
             trace.write(tool="agent", event="stalled_candidate", round=rnd,
@@ -203,6 +208,8 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
             last_log = msg
             last_stage = "interface"
             last_error_class = classify_failure(msg, last_stage)
+            trace.write(tool="agent", event="candidate_rejected", round=rnd,
+                        stage=last_stage, reason=msg[:500])
             if quality >= best_quality:
                 best, best_quality = code, quality
                 save(best)
@@ -222,6 +229,8 @@ def solve_agent(llm: LLM, trace: Trace, prompt: str, interface: str, top: str,
             last_log = _with_note(interface_note, msg)
             last_stage = "static_check"
             last_error_class = "RTL 混入测试台或仿真专用构造"
+            trace.write(tool="agent", event="candidate_rejected", round=rnd,
+                        stage=last_stage, reason=msg[:500])
             continue
 
         remaining = DEADLINE_S - (time.time() - started) - RESERVE_S
