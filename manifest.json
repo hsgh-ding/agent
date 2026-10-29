@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "track": "rtl",
+  "model": {
+    "name": "Qwen/Qwen3-8B",
+    "source": "https://huggingface.co/Qwen/Qwen3-8B",
+    "revision": null,
+    "quantization": "none",
+    "measured_vram_gb": null,
+    "finetuned": false,
+    "finetune_weights_url": null
+  },
+  "auxiliary_models": [],
+  "context": {
+    "max_model_len": 32768,
+    "max_output_tokens": 16384,
+    "rope_scaling": null
+  },
+  "generation": {
+    "chat_template_kwargs": {
+      "enable_thinking": false
+    },
+    "reasoning_effort": null
+  },
+  "serving": {
+    "backend": "vllm",
+    "version": null,
+    "start_command": "./serve/vllm.sh",
+    "port": 8000
+  },
+  "endpoints": {
+    "solve": "./run.sh",
+    "baseline": "./run_baseline.sh",
+    "http_port": 7860
+  },
+  "agent": {
+    "max_rounds": 4,
+    "tools": [
+      "check_interface",
+      "check_source_hygiene",
+      "lint",
+      "synth"
+    ],
+    "skills": [
+      "rtl-module-interface-contract",
+      "rtl-design-checklist",
+      "rtl-reset-and-clock",
+      "rtl-fsm-and-widths",
+      "vivado-synthesis-diagnostics"
+    ]
+  }
+}
